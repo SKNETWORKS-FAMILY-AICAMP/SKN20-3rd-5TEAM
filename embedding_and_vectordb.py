@@ -6,6 +6,10 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from typing import List
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # .env 파일에서 환경 변수 로드
 
 def create_embeddings_and_vectordb(documents: List[Document]):
     """
@@ -17,7 +21,7 @@ def create_embeddings_and_vectordb(documents: List[Document]):
     Returns:
     - OpenAIEmbeddings: 생성된 임베딩 객체
     """
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=os.getenv("OPENAI_API_KEY"))
 
     vectorstore = Chroma.from_documents(
         documents=documents,
