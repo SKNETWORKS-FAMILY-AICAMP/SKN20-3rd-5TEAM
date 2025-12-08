@@ -1,3 +1,6 @@
+chroma_db/
+*.bin
+*.sqlite3
 *.json
 .env
 *.csv
