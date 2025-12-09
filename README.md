@@ -52,7 +52,7 @@ flowchart TD
 ## 👥 팀구성
 | <img src="./image/쿼카.jpeg" width="150"> <br> 문창교 |  <img src="./image/dak.jpeg" width="150"> <br> 권규리 |  <img src="./image/rich.jpeg" width="150"> <br> 김황현 |  <img src="./image/loopy.jpeg" width="150"> <br> 김효빈 |  <img src="./image/ham.jpeg" width="150"> <br> 이승규 |
 |:------:|:------:|:------:|:------:|:------:|
-| <a href="https://github.com/mck-1902"><img src="https://img.shields.io/badge/GitHub-mck-1902-blue?logo=github"></a> | <a href="https://github.com/gyur1eek"><img src="https://img.shields.io/badge/GitHub-gyur1eek-yellow?logo=github"></a> | <a href="https://github.com/hyun2kim"><img src="https://img.shields.io/badge/GitHub-khyun2kim-green?logo=github"></a> | <a href="https://github.com/kimobi"><img src="https://img.shields.io/badge/GitHub-kimobi-pink?logo=github"></a> | <a href="https://github.com/neobeauxarts"><img src="https://img.shields.io/badge/GitHub-neobeauxarts-lightblue?logo=github"></a> |
+| <a href="https://github.com/mck1902"><img src="https://img.shields.io/badge/GitHub-mck1902-blue?logo=github"></a> | <a href="https://github.com/gyur1eek"><img src="https://img.shields.io/badge/GitHub-gyur1eek-yellow?logo=github"></a> | <a href="https://github.com/hyun2kim"><img src="https://img.shields.io/badge/GitHub-khyun2kim-green?logo=github"></a> | <a href="https://github.com/kimobi"><img src="https://img.shields.io/badge/GitHub-kimobi-pink?logo=github"></a> | <a href="https://github.com/neobeauxarts"><img src="https://img.shields.io/badge/GitHub-neobeauxarts-lightblue?logo=github"></a> |
 
 ---
 <p align="center" style="margin-bottom: 14px;">
