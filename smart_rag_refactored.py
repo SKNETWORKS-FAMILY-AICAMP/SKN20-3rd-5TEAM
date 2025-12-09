@@ -1,3 +1,31 @@
+
+'''
+주요 개선 사항 요약
+1. 구조적 개선
+
+설정 분리: RAGConfig 데이터클래스로 모든 설정값 중앙 관리
+열거형 사용: QueryType, SourceType, FilterOperator Enum으로 매직 스트링 제거
+데이터클래스 활용: FilterCondition, QueryAnalysis, FilterResult, DBStats 등으로 구조화
+
+2. 중복 제거
+
+메타데이터 접근 패턴을 get_metadata_value() 유틸리티로 통일
+포맷팅 로직을 _format_shelter_brief(), _format_shelter_detail()로 추출
+쿼리 핸들러를 딕셔너리 기반 디스패치로 단순화
+
+3. 가독성 향상
+
+from __future__ import annotations로 타입 힌트 현대화
+Google 스타일 docstring 적용
+논리적 섹션별 구분 (설정 → Enum → 데이터클래스 → 유틸리티 → 컴포넌트 → 메인)
+상수(DISASTER_KEYWORDS, RAG_SYSTEM_PROMPT)를 클래스/모듈 레벨로 분리
+
+4. 타입 안전성
+
+모든 함수에 명시적 반환 타입
+list[Document] 대신 list[Document] (Python 3.9+ 스타일)
+Optional[str] → str | None (Python 3.10+ 스타일)
+'''
 """
 Smart RAG 시스템 (하이브리드 리트리버)
 
