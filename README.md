@@ -49,8 +49,10 @@ flowchart TD
 
 ---
 
-## 👥 팀 구성
-문창교 · 김황현 · 김효빈 · 이승규 · 권규리
+## 👥 팀구성
+| <img src="./images/창교.jpg" width="150"> <br> 문창교 |  <img src="./images/규리.jpg" width="150"> <br> 권규리 |  <img src="./images/황현.jpg" width="150"> <br> 김황현 |  <img src="./images/효빈.jpg" width="150"> <br> 김효빈 |  <img src="./images/승규.jpg" width="150"> <br> 이승규 |
+|:------:|:------:|:------:|:------:|:------:|
+| <a href="https://github.com/kimobi"><img src="https://img.shields.io/badge/GitHub-kimobi-blue?logo=github"></a> | <a href="https://github.com/hyeonnll"><img src="https://img.shields.io/badge/GitHub-hyeonnll-yellow?logo=github"></a> | <a href="https://github.com/kimobi"><img src="https://img.shields.io/badge/GitHub-kimobi-green?logo=github"></a> | <a href="https://github.com/mansio0314"><img src="https://img.shields.io/badge/GitHub-mansio0314-lightblue?logo=github"></a> | <a href="https://github.com/mminguu"><img src="https://img.shields.io/badge/GitHub-mminguu-pink?logo=github"></a> |
 
 ---
 <p align="center" style="margin-bottom: 14px;">
