@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="ko">
+<!--
+=================================================================================
+대피소 안내 챗봇 - 프론트엔드 (shelter_1.0.html)
+=================================================================================
+
+[프로젝트 개요]
+- 사용자 위치 기반 가장 가까운 대피소 검색 및 재난행동요령 안내
+- FastAPI 백엔드(app_new.py)와 연동하여 LLM 기반 의도 분류 및 검색
+- 네이버 지도 API를 통한 시각적 대피소 위치 표시
+
+[사용 기술 스택]
+- Tailwind CSS: 반응형 UI 스타일링
+- Naver Maps API: 지도 표시 및 마커 생성
+- Fetch API: FastAPI 서버와 비동기 통신
+- Geolocation API: 사용자 GPS 위치 획득
+- JavaScript (ES6+): 클라이언트 로직 구현
+
+[백엔드 API 연동]
+- 서버: FastAPI (app_new.py)
+- 엔드포인트:
+  * GET  /api/status                 - 서버 상태 및 LLM 가용성 확인
+  * POST /api/location/extract       - 의도 분류 및 대피소/재난행동요령 검색
+  * GET  /api/shelters/nearest       - GPS 좌표 기반 가장 가까운 대피소 검색
+
+=================================================================================
+[함수 목록 및 역할]
+=================================================================================
+
+[1] 초기화 및 설정
+─────────────────────────────────────────────────────────────────────────
+✓ DOMContentLoaded 이벤트 리스너
+  - 역할: 페이지 로드 완료 시 API 서버 상태 확인 및 초기 UI 설정
+  - 호출 함수: checkApiStatus() → updateLlmBadge() → showActionButtons()
+  - 백엔드 연동: GET /api/status
+
+✓ API_BASE_URL (즉시 실행 함수)
+  - 역할: 현재 접속 환경(프로토콜, 호스트명, 포트)을 감지하여 API 서버 주소 자동 설정
+  - 반환: 'https://127.0.0.1:8443' 또는 동적 URL
+
+[2] 서버 API 연동 함수
+─────────────────────────────────────────────────────────────────────────
+✓ checkApiStatus()
+  - 역할: FastAPI 서버 연결 상태 및 LLM 사용 가능 여부 확인
+  - 백엔드 연동: GET /api/status
+  - 호출 함수: updateLlmBadge()
+  - 전역 변수 설정: API_AVAILABLE, USE_LLM
+
+✓ updateLlmBadge()
+  - 역할: 우측 상단 LLM 상태 배지 업데이트 (LLM ON / 규칙 기반 / 로컬 모드)
+  - DOM 조작: #llm-status 요소의 클래스 및 텍스트 변경
+
+✓ extractLocationWithLLM(query)
+  - 역할: 사용자 입력을 FastAPI 서버로 전송하여 의도 분류 및 검색 수행
+  - 파라미터: query (사용자 입력 문자열)
+  - 백엔드 연동: POST /api/location/extract
+  - 반환: { success, location, coordinates, shelters, message } 또는 null
+
+✓ searchSheltersByCoordinates(lat, lon, locationName)
+  - 역할: 위경도 좌표 기반으로 가장 가까운 대피소 5곳 검색
+  - 파라미터: lat(위도), lon(경도), locationName(위치명, 옵션)
+  - 백엔드 연동: GET /api/shelters/nearest?lat={lat}&lon={lon}&k=5
+  - 반환: 대피소 배열 [{ name, address, lat, lon, capacity, distance }] 또는 null
+
+[3] UI 제어 함수
+─────────────────────────────────────────────────────────────────────────
+✓ setControlsDisabled(disabled)
+  - 역할: 모든 버튼 및 입력창 활성화/비활성화 (중복 클릭 방지)
+  - 파라미터: disabled (boolean)
+  - 대상 요소: #geo-btn, #send-btn, #chat-input
+
+✓ showActionButtons(enableControls)
+  - 역할: 현위치 버튼 표시/숨김 및 활성화 제어
+  - 파라미터: enableControls (boolean)
+  - 호출 함수: setControlsDisabled(!enableControls)
+  - DOM 조작: #initial-actions의 hidden 클래스 토글
+
+✓ addMessage(sender, text, isResult)
+  - 역할: 채팅창에 메시지 추가 (사용자/봇/결과 메시지 구분)
+  - 파라미터: sender ('user' | 'bot'), text (HTML 문자열), isResult (boolean)
+  - DOM 조작: #chat-window에 메시지 div 추가 및 스크롤 이동
+
+[4] GPS 및 위치 처리 함수
+─────────────────────────────────────────────────────────────────────────
+✓ handleGeolocation()
+  - 역할: "현위치로 찾기" 버튼 클릭 시 GPS 위치 요청 시작
+  - 호출 함수: 
+    - setControlsDisabled(true)
+    - addMessage('user', ...), addMessage('bot', ...)
+    - navigator.geolocation.getCurrentPosition(onSuccessGeolocation, onErrorGeolocation)
+  - 사용자 트리거: 버튼 클릭 (onclick="handleGeolocation()")
+
+✓ onSuccessGeolocation(position)
+  - 역할: GPS 위치 획득 성공 시 대피소 검색 및 결과 표시
+  - 파라미터: position (Geolocation Position 객체)
+  - 호출 함수:
+    - addMessage('bot', ...) - 위치 확인 메시지
+    - searchSheltersByCoordinates(lat, lon) - 대피소 검색
+    - haversine(lat1, lon1, lat2, lon2) - 거리 재계산
+    - displayLLMShelterResults(location, coords, shelters) - 결과 표시
+  - 오류 처리: 대피소 없을 시 에러 메시지 표시
+
+✓ onErrorGeolocation(error)
+  - 역할: GPS 위치 획득 실패 시 오류 처리 및 UI 복원
+  - 파라미터: error (GeolocationPositionError 객체)
+  - 오류 코드: 1(권한 거부), 2(위치 확인 불가), 3(시간 초과)
+  - 호출 함수: addMessage('bot', ...), setControlsDisabled(false), showActionButtons(true)
+
+✓ haversine(lat1, lon1, lat2, lon2)
+  - 역할: Haversine 공식을 사용한 두 지점 간 구면 거리 계산 (단위: km)
+  - 파라미터: lat1, lon1 (출발지 좌표), lat2, lon2 (도착지 좌표)
+  - 반환: 거리 (km, float)
+  - 수식: R * 2 * atan2(√a, √(1-a)), where R = 6371km (지구 반지름)
+
+✓ toRad(degrees)
+  - 역할: 각도(degree)를 라디안(radian)으로 변환
+  - 파라미터: degrees (각도)
+  - 반환: degrees * (π / 180)
+
+[5] 채팅 입력 처리 함수
+─────────────────────────────────────────────────────────────────────────
+✓ handleChatInput()
+  - 역할: 채팅 입력창에서 메시지 전송 시 처리 (LLM 우선 사용)
+  - 사용자 트리거: 
+    - 전송 버튼 클릭 (onclick="handleChatInput()")
+    - Enter 키 입력 (onkeydown 이벤트)
+  - 처리 순서:
+    1. 입력값 trim 및 검증
+    2. "현위치" 키워드 감지 → handleGeolocation() 호출
+    3. LLM API 사용 가능 시 → extractLocationWithLLM(query) 호출
+    4. 응답 타입별 분기:
+       - shelters 있음 → displayLLMShelterResults() 호출
+       - message 있음 → 재난행동요령/일반대화 응답 표시
+    5. API 불가 시 → 에러 메시지 표시
+  - 호출 함수: 
+    - handleGeolocation() (현위치 키워드 감지 시)
+    - extractLocationWithLLM(query) (LLM 검색)
+    - displayLLMShelterResults() (대피소 결과 표시)
+    - addMessage(), setControlsDisabled(), showActionButtons()
+
+[6] 검색 결과 표시 함수
+─────────────────────────────────────────────────────────────────────────
+✓ displayLLMShelterResults(locationName, coords, shelters)
+  - 역할: 대피소 검색 결과를 채팅창과 지도에 표시
+  - 파라미터:
+    - locationName: 검색 위치명 (예: "강남역")
+    - coords: [lat, lon] 배열 (검색 중심 좌표)
+    - shelters: 대피소 객체 배열
+  - 생성 요소:
+    - 가장 가까운 대피소 정보 카드 (이름, 주소, 거리, 수용인원)
+    - 전체 대피소 목록 (드롭다운, <details> 태그 사용)
+    - 카카오맵 링크 버튼 (외부 지도 앱 연동)
+  - 호출 함수: 
+    - addMessage('bot', ..., true) - 결과 메시지 추가
+    - showMapWithMultipleShelters(lat, lon, shelters, locationName) - 지도 표시
+    - setControlsDisabled(false), showActionButtons(true) - UI 복원
+
+[7] 지도 표시 함수
+─────────────────────────────────────────────────────────────────────────
+✓ showMapWithMultipleShelters(centerLat, centerLon, shelters, locationName)
+  - 역할: 네이버 지도에 검색 위치와 여러 대피소를 마커로 표시
+  - 파라미터:
+    - centerLat, centerLon: 검색 중심 좌표
+    - shelters: 대피소 배열
+    - locationName: 검색 위치명
+  - 지도 요소:
+    - 중심점 마커 (파란색 말풍선, 검색 위치)
+    - 대피소 마커들 (빨간색 = 가장 가까운, 기본 = 나머지)
+    - 정보창 (InfoWindow): 클릭 시 대피소 상세 정보 표시
+  - 네이버 맵 API 사용:
+    - new naver.maps.Map() - 지도 생성
+    - new naver.maps.Marker() - 마커 생성
+    - new naver.maps.InfoWindow() - 정보창 생성
+    - map.fitBounds(bounds) - 모든 마커 포함하도록 뷰포트 조정
+    - naver.maps.Event.addListener() - 클릭 이벤트 등록
+  - 호출 함수: closeAllInfoWindows() - 기존 정보창 닫기
+  - 전역 변수 수정: map, userMarker, shelterMarkers[]
+
+✓ closeAllInfoWindows()
+  - 역할: 열려있는 모든 네이버 지도 정보창 닫기
+  - 전역 변수 사용: openInfoWindows[] (정보창 배열)
+  - 동작: 배열의 모든 InfoWindow.close() 호출 후 배열 초기화
+
+=================================================================================
+[전역 변수]
+=================================================================================
+- API_BASE_URL: FastAPI 서버 주소 (동적 감지)
+- USE_LLM: LLM 사용 가능 여부 (boolean)
+- API_AVAILABLE: 서버 연결 가능 여부 (boolean)
+- map: 네이버 지도 객체 (naver.maps.Map)
+- userMarker: 사용자 위치 마커 (naver.maps.Marker)
+- shelterMarkers: 대피소 마커 배열 (naver.maps.Marker[])
+- openInfoWindows: 열린 정보창 배열 (naver.maps.InfoWindow[])
+- chatWindow: 채팅창 DOM 요소 (#chat-window)
+- initialActions: 초기 액션 버튼 컨테이너 (#initial-actions)
+- chatInput: 채팅 입력 필드 (#chat-input)
+- sendBtn: 전송 버튼 (#send-btn)
+- actionButtons: 제어 대상 버튼 배열 [geo-btn, send-btn]
+
+=================================================================================
+[함수 호출 흐름도]
+=================================================================================
+
+[페이지 로드]
+DOMContentLoaded
+  └─> checkApiStatus()
+        └─> updateLlmBadge()
+  └─> showActionButtons(true)
+        └─> setControlsDisabled(false)
+
+[현위치 검색]
+handleGeolocation() [onclick]
+  └─> setControlsDisabled(true)
+  └─> addMessage('user', ...), addMessage('bot', ...)
+  └─> navigator.geolocation.getCurrentPosition()
+        ├─> [성공] onSuccessGeolocation(position)
+        │     └─> searchSheltersByCoordinates(lat, lon)
+        │           └─> [백엔드] GET /api/shelters/nearest
+        │     └─> haversine() (거리 재계산)
+        │     └─> displayLLMShelterResults(location, coords, shelters)
+        │           └─> addMessage('bot', ..., true)
+        │           └─> showMapWithMultipleShelters()
+        │                 └─> closeAllInfoWindows()
+        │                 └─> new naver.maps.Marker() (여러 개)
+        │                 └─> new naver.maps.InfoWindow() (클릭 이벤트)
+        │
+        └─> [실패] onErrorGeolocation(error)
+              └─> addMessage('bot', ...)
+              └─> setControlsDisabled(false)
+              └─> showActionButtons(true)
+
+[채팅 입력 검색]
+handleChatInput() [onclick / onkeydown]
+  ├─> [현위치 키워드] handleGeolocation() (위와 동일한 흐름)
+  │
+  ├─> [일반 검색] extractLocationWithLLM(query)
+  │     └─> [백엔드] POST /api/location/extract
+  │     └─> [응답: shelters 있음] displayLLMShelterResults()
+  │           └─> (위와 동일)
+  │     └─> [응답: message 있음] addMessage('bot', message) (재난행동요령/일반대화)
+  │
+  └─> [API 불가] addMessage('bot', 에러 메시지)
+
+=================================================================================
+-->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>가장 가까운 대피소 찾기 챗봇</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 네이버 지도 API 스크립트: 지도(maps)와 주소 검색(geocoding) 모듈을 함께 로드합니다. -->
+    <script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=lw2n4pvfl5&amp;submodules=panorama,geocoder,drawing,visualization"></script>
+    <style>
+        /* 폰트 설정 및 기본 스타일 */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8;
+        }
+        /* 스크롤바 숨기기 (깔끔한 모바일 뷰) */
+        #chat-window {
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none;  /* IE and Edge */
+        }
+        #chat-window::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
+        }
+        /* 지도 컨테이너가 로드된 후 내부의 텍스트를 지우기 위함 */
+        #map > div:only-child {
+            display: none;
+        }
+        /* 로딩 중 버튼 비활성화 스타일 */
+        .disabled-control {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* [추가된 부분] 챗봇 전체 컨테이너 배경 이미지 설정 */
+        #main-chat-container {
+            background-image: url('http://googleusercontent.com/image_generation_content/0');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+
+        /* [수정된 부분] 채팅창 배경에 투명도 추가하여 이미지 보이게 함 */
+        #chat-window {
+             background-color: rgba(255, 255, 255, 0.7); /* 흰색 배경에 70% 투명도 적용 */
+        }
+        /* [수정된 부분] 컨트롤 패널 배경에 투명도 추가 */
+        #control-panel {
+             background-color: rgba(255, 255, 255, 0.85); /* 흰색 배경에 85% 투명도 적용 */
+        }
+        
+        /* LLM 상태 표시 */
+        .llm-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        .llm-on { background-color: #10B981; color: white; }
+        .llm-off { background-color: #6B7280; color: white; }
+    </style>
+
+    </head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="w-full max-w-md bg-white rounded-xl shadow-2xl flex flex-col h-[80vh] overflow-hidden">
+
+        <header class="p-4 bg-red-600 text-white shadow-md rounded-t-xl">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-xl font-bold">🚨 가까운 대피소 찾기 챗봇</h1>
+                    <p class="text-xs mt-1 opacity-90">민방위대피시설 정보를 기반으로 안내합니다.</p>
+                </div>
+                <div id="llm-status" class="llm-badge llm-off">LLM OFF</div>
+            </div>
+        </header>
+
+        <!-- 지도 영역 (높이 확대) -->
+        <div id="map" style="width:100%;height:150px;min-height:150px;">
+
+        </div>
+
+        <div id="chat-window" class="flex-grow p-4 space-y-4 overflow-y-auto bg-white">
+            <div class="flex justify-start">
+                <div class="bg-gray-100 text-gray-800 p-3 rounded-xl rounded-tl-none max-w-[80%] shadow-sm">
+                    <p class="font-semibold mb-1">🛡️ 대피소 도우미</p>
+                    <p id="initial-message">대피소 데이터를 로드하는 중입니다. 잠시만 기다려 주세요...</p>
+                </div>
+            </div>
+            </div>
+
+        <div id="control-panel" class="p-4 bg-white border-t border-gray-200">
+
+            <!-- 1. 현위치 버튼 -->
+            <div id="initial-actions" class="flex flex-col space-y-2">
+                <button id="geo-btn" onclick="handleGeolocation()" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold transition duration-150 shadow-md disabled-control" disabled>
+                    📍 현위치로 찾기 (GPS)
+                </button>
+            </div>
+
+            <!-- 2. 대화 입력창과 전송 버튼 -->
+            <div id="chat-input-container" class="flex items-center space-x-2 mt-2">
+                <input type="text" id="chat-input" placeholder="주소나 건물명으로 대피소를 검색해 보세요."
+                       class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500"
+                       onkeydown="if(event.key === 'Enter') handleChatInput()">
+                <button id="send-btn" onclick="handleChatInput()"
+                        class="bg-red-600 text-white p-3 rounded-lg font-bold transition duration-150 hover:bg-red-700 shadow-md disabled-control" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+                        <path d="M3.478 2.405a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.405Z" />
+                    </svg>
+                </button>
+            </div>
+
+
+        </div>
+
+    </div>
+
+    <script>
+        // =================================================================
+        // 설정
+        // =================================================================
+        
+        // API 서버 주소 자동 감지
+        const API_BASE_URL = (() => {
+            const hostname = window.location.hostname;
+            const protocol = window.location.protocol; // http: 또는 https:
+            const port = window.location.port || '8443'; // 현재 포트 또는 기본 8443
+            
+            // localhost, 127.0.0.1, 또는 빈 문자열(파일로 열었을 때)인 경우
+            if (!hostname || hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
+                // 파일로 열었을 때는 HTTPS 서버 사용
+                return 'https://127.0.0.1:8443';
+            }
+            
+            // 그 외의 경우 현재 프로토콜과 포트 사용 (HTTPS 환경)
+            return `${protocol}//${hostname}:${port}`;
+        })();
+        
+        console.log('🌐 API 서버 주소:', API_BASE_URL);
+        
+        // LLM 사용 여부 (서버에서 확인)
+        let USE_LLM = false;
+        let API_AVAILABLE = false;
+
+        // 2. 네이버 지도 객체 관련 변수 선언
+        let map = null;
+        let userMarker = null;
+        let shelterMarkers = []; // 여러 대피소 마커
+        let openInfoWindows = []; // 열린 정보창 추적
+
+        const chatWindow = document.getElementById('chat-window');
+        const initialActions = document.getElementById('initial-actions');
+        const initialMessageEl = document.getElementById('initial-message');
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+        const actionButtons = [
+            document.getElementById('geo-btn'),
+            sendBtn,
+        ];
+        
+        // =================================================================
+        // LLM API 연동 함수
+        // =================================================================
+        
+        async function checkApiStatus() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/status`);
+                if (response.ok) {
+                    const data = await response.json();
+                    API_AVAILABLE = true;
+                    USE_LLM = data.llm_available;
+                    updateLlmBadge();
+                    console.log('API 상태:', data);
+                    return data;
+                }
+            } catch (error) {
+                console.log('API 서버 연결 실패, 로컬 모드로 동작합니다:', error);
+                API_AVAILABLE = false;
+                USE_LLM = false;
+                updateLlmBadge();
+            }
+            return null;
+        }
+        
+        function updateLlmBadge() {
+            const badge = document.getElementById('llm-status');
+            if (API_AVAILABLE && USE_LLM) {
+                badge.className = 'llm-badge llm-on';
+                badge.textContent = '🤖 LLM ON';
+            } else if (API_AVAILABLE) {
+                badge.className = 'llm-badge llm-off';
+                badge.textContent = '📍 규칙 기반';
+            } else {
+                badge.className = 'llm-badge llm-off';
+                badge.textContent = '📂 로컬 모드';
+            }
+        }
+        
+        async function extractLocationWithLLM(query) {
+            /**
+             * LLM API를 사용하여 지명을 추출하고 대피소를 검색합니다.
+             */
+            if (!API_AVAILABLE) {
+                return null;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/location/extract`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json; charset=utf-8',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        use_llm: USE_LLM
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('LLM 응답:', data);
+                    return data;
+                }
+            } catch (error) {
+                console.error('LLM API 호출 오류:', error);
+            }
+            return null;
+        }
+
+        // -------------------------------------------------------------------------
+        // [핵심 기능] 서버 API 기반 대피소 검색
+        // -------------------------------------------------------------------------
+        function setControlsDisabled(disabled) {
+            actionButtons.forEach(btn => {
+                if (btn) {
+                    btn.disabled = disabled;
+                    btn.classList.toggle('disabled-control', disabled);
+                    // 현위치 버튼 호버 스타일
+                    if (btn.id === 'geo-btn') {
+                       btn.classList.toggle('hover:bg-blue-700', !disabled);
+                    }
+                    // 전송 버튼 호버 스타일
+                    if (btn.id === 'send-btn') {
+                       btn.classList.toggle('hover:bg-red-700', !disabled);
+                    }
+                }
+            });
+            // 채팅 입력 필드 비활성화
+            if (chatInput) {
+                chatInput.disabled = disabled;
+            }
+        }
+
+        // ========================================================================
+        // 서버 API 호출: 좌표 기반 대피소 검색
+        // FastAPI 서버의 /api/shelters/nearest 엔드포인트와 통신
+        // ========================================================================
+        async function searchSheltersByCoordinates(lat, lon, locationName = "현재 위치") {
+            try {
+                console.log('[DEBUG] API 호출 시작:', `${API_BASE_URL}/api/shelters/nearest?lat=${lat}&lon=${lon}&k=5`);
+                
+                // 1. FastAPI 서버에 HTTP GET 요청 전송
+                // 쿼리 파라미터: lat(위도), lon(경도), k(반환할 대피소 개수)
+                const response = await fetch(`${API_BASE_URL}/api/shelters/nearest?lat=${lat}&lon=${lon}&k=5`);
+                
+                console.log('[DEBUG] 서버 응답 상태:', response.status);
+                
+                // 2. HTTP 응답 상태 확인
+                if (!response.ok) {
+                    throw new Error(`서버 응답 오류: ${response.status}`);
+                }
+                
+                // 3. JSON 응답 데이터 파싱
+                const data = await response.json();
+                console.log('[DEBUG] 서버 응답 데이터:', data);
+                // 예상 응답 형식: { user_location: {lat, lon}, shelters: [...], total_count: number }
+                
+                // 4. 서버 응답 데이터 정규화
+                // 서버에서 오는 데이터 형식을 클라이언트에서 사용하기 쉬운 형태로 변환
+                const shelters = data.shelters.map(shelter => ({
+                    ...shelter,                        // 기존 속성들 유지
+                    distance: shelter.distance || 0,   // distance 필드 보장
+                    capacity: shelter.capacity || 0    // capacity 필드 보장 (수용인원)
+                }));
+                
+                console.log('[DEBUG] 정규화된 대피소 데이터:', shelters);
+                return shelters;
+            } catch (error) {
+                // 5. 네트워크 오류 또는 서버 오류 처리
+                console.error('[ERROR] 좌표 기반 검색 오류:', error);
+                return null; // 오류 시 null 반환하여 상위 함수에서 처리하도록 함
+            }
+        }
+
+        // 메시지 추가 함수
+        function addMessage(sender, text, isResult = false) {
+            const messageWrapper = document.createElement('div');
+            const messageContent = document.createElement('div');
+
+            if (sender === 'user') {
+                messageWrapper.className = 'flex justify-end';
+                messageContent.className = 'bg-red-100 text-gray-900 p-3 rounded-xl rounded-tr-none max-w-[80%] shadow-sm';
+            } else {
+                messageWrapper.className = 'flex justify-start';
+                let bgColor = isResult ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-800';
+                messageContent.className = `${bgColor} p-3 rounded-xl rounded-tl-none max-w-[80%] shadow-sm`;
+                if (!isResult) {
+                     messageContent.innerHTML = `<p class="font-semibold mb-1">🛡️ 대피소 도우미</p>${text}`;
+                } else {
+                     messageContent.innerHTML = `<p class="font-bold mb-1">✅ 가장 가까운 대피소 결과</p>${text}`;
+                }
+            }
+
+            if (sender === 'user') {
+                messageContent.innerHTML = text;
+            }
+
+            messageWrapper.appendChild(messageContent);
+            chatWindow.appendChild(messageWrapper);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        // 거리 계산 함수 (Haversine) - 클라이언트 표시용
+        const EARTH_RADIUS_KM = 6371;
+        function toRad(degrees) { return degrees * (Math.PI / 180); }
+        function haversine(lat1, lon1, lat2, lon2) {
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const rLat1 = toRad(lat1);
+            const rLat2 = toRad(lat2);
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2) *
+                      Math.cos(rLat1) * Math.cos(rLat2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return EARTH_RADIUS_KM * c;
+        }
+
+        // showMap 함수 제거됨 (showMapWithMultipleShelters 사용)
+
+        // ========================================================================
+        // GPS 위치 정보 획득 실패 처리 함수
+        // navigator.geolocation.getCurrentPosition의 두 번째 콜백 (실패 시 호출)
+        // ========================================================================
+        function onErrorGeolocation(error) {
+            console.log('[ERROR] Geolocation 오류 발생:', error);
+            
+            // GPS 오류 코드에 따른 상세 메시지 생성
+            let errorMessage = '위치 정보를 가져오는 데 실패했습니다.';
+            
+            // error.code 값별 의미:
+            // 1 (PERMISSION_DENIED): 사용자가 위치 정보 제공을 거부함
+            // 2 (POSITION_UNAVAILABLE): 네트워크 오류 등으로 위치 확인 불가
+            // 3 (TIMEOUT): 위치 정보 요청 시간 초과
+            if (error.code === 1) errorMessage += ' (권한 거부됨)';
+            else if (error.code === 2) errorMessage += ' (위치 확인 불가)';
+            else if (error.code === 3) errorMessage += ' (시간 초과)';
+
+            console.log('[ERROR] Geolocation 에러 메시지:', errorMessage);
+            
+            // 오류 메시지를 채팅창에 표시
+            addMessage('bot', `<span class="text-red-500 font-bold">${errorMessage}</span>`, false);
+            
+            // UI 복원: 버튼 다시 활성화 및 초기 상태로 되돌리기
+            setControlsDisabled(false); // 버튼 다시 활성화
+            showActionButtons(true);     // 초기 액션 버튼들 다시 표시
+        }
+
+        // ========================================================================
+        // GPS 위치 정보 획득 성공 처리 함수 (메인 로직)
+        // navigator.geolocation.getCurrentPosition의 첫 번째 콜백 (성공 시 호출)
+        // ========================================================================
+        async function onSuccessGeolocation(position) {
+            console.log('[DEBUG] onSuccessGeolocation 함수 시작, 위치 데이터:', position);
+            
+            // 1. GPS에서 받은 좌표 정보 추출
+            const latitude = position.coords.latitude;   // 위도 (남북 위치)
+            const longitude = position.coords.longitude; // 경도 (동서 위치)
+
+            console.log('[DEBUG] 추출된 좌표:', {latitude, longitude});
+
+            // 2. 사용자에게 위치 정보 획득 완료 알림 (소수점 4자리까지 표시)
+            addMessage('bot', `현재 위치를 찾았습니다. 위도: ${latitude.toFixed(4)}, 경도: ${longitude.toFixed(4)}`, false);
+            
+            // 3. 대피소 검색 시작 알림
+            addMessage('bot', '🔍 주변 대피소를 검색하고 있습니다...', false);
+            
+            console.log('[DEBUG] API 호출 준비 중...');
+            
+            // 4. 서버 API 호출: 현재 좌표 기준 가장 가까운 대피소 5개 검색
+            // searchSheltersByCoordinates 함수가 FastAPI 서버의 /api/shelters/nearest 엔드포인트 호출
+            const shelters = await searchSheltersByCoordinates(latitude, longitude, "현재 위치");
+            console.log('[DEBUG] 서버에서 받은 대피소 데이터:', shelters);
+            
+            // 5. 검색 결과 처리
+            if (shelters && shelters.length > 0) {
+                // 5-1. 클라이언트에서 정확한 거리 재계산 (하버사인 공식 사용)
+                // 서버에서도 거리를 계산하지만, 클라이언트에서 더 정확한 거리 계산
+                shelters.forEach(shelter => {
+                    shelter.distance = haversine(latitude, longitude, shelter.lat, shelter.lon);
+                });
+                
+                // 5-2. 거리순으로 정렬 (가까운 순서대로)
+                shelters.sort((a, b) => a.distance - b.distance);
+                
+                // 5-3. 성공 메시지 표시
+                addMessage('bot', `✅ 현재 위치 주변 대피소를 찾았습니다! (총 ${shelters.length}개)`, false);
+                
+                // 5-4. 대피소 결과를 지도와 함께 표시
+                // displayLLMShelterResults: 대피소 목록을 채팅창에 표시하고 네이버 지도에 마커 표시
+                displayLLMShelterResults("현재 위치", [latitude, longitude], shelters);
+            } else {
+                // 6. 검색 결과가 없는 경우
+                addMessage('bot', `<span class="text-red-500 font-bold">주변에 대피소를 찾을 수 없습니다.</span>`, false);
+                
+                // UI 복원: 버튼 활성화 및 초기 상태로 되돌리기
+                setControlsDisabled(false);
+                showActionButtons(true);
+            }
+        }
+
+        // ========================================================================
+        // 현위치 핸들러 - "📍 현위치로 찾기 (GPS)" 버튼 클릭 시 실행되는 메인 함수
+        // ========================================================================
+        function handleGeolocation() {
+            console.log('[DEBUG] handleGeolocation 함수 시작');
+            
+            // 1. UI 제어: 모든 버튼과 입력창 비활성화 (중복 클릭 방지)
+            setControlsDisabled(true);
+            
+            // 2. UI 제어: 초기 액션 버튼들 숨기기 (현위치/채팅입력만 남김)
+            initialActions.classList.add('hidden');
+            
+            // 3. 채팅 UI: 사용자가 버튼을 클릭했다는 메시지 표시
+            addMessage('user', '📍 현위치로 가까운 대피소를 검색해 줘.');
+            
+            // 4. 채팅 UI: GPS 위치 가져오는 중이라는 상태 메시지 표시
+            addMessage('bot', 'GPS를 통해 현재 위치 정보를 가져오는 중입니다...', false);
+
+            // 5. GPS 위치 정보 요청 시작
+            if (navigator.geolocation) {
+                console.log('[DEBUG] Geolocation API 지원됨. getCurrentPosition 호출 시작');
+                // 브라우저가 Geolocation API를 지원하는 경우
+                // - getCurrentPosition: 현재 위치를 한 번만 가져오는 함수
+                // - 성공 시: onSuccessGeolocation 콜백 함수 실행
+                // - 실패 시: onErrorGeolocation 콜백 함수 실행
+                navigator.geolocation.getCurrentPosition(onSuccessGeolocation, onErrorGeolocation);
+            } else {
+                console.log('[ERROR] Geolocation API 지원되지 않음');
+                // 브라우저가 Geolocation API를 지원하지 않는 경우 (매우 오래된 브라우저)
+                addMessage('bot', '<span class="text-red-500 font-bold">이 브라우저에서는 Geolocation이 지원되지 않습니다.</span>', false);
+                setControlsDisabled(false);  // 버튼 다시 활성화
+                showActionButtons(true);     // 초기 버튼들 다시 표시
+            }
+        }
+
+        // handleAddressSearch 함수 제거됨 (LLM 기반 채팅 입력으로 완전 대체)
+
+        // [수정된 함수] 채팅 입력 처리 - LLM 우선 사용
+        async function handleChatInput() {
+            const rawQuery = chatInput.value.trim();
+            chatInput.value = ''; // 입력창 비우기
+            chatInput.focus(); // 포커스 유지
+
+            if (rawQuery === '') {
+                return;
+            }
+
+            // 1. 현위치 키워드 처리 (가장 높은 우선순위)
+            // '현위치', '현재 위치', '여기', '내 위치' 등을 포함하면 GPS 검색
+            if (rawQuery.includes('현위치') || rawQuery.includes('현재 위치') || rawQuery.includes('여기') || rawQuery.includes('내 위치')) {
+                handleGeolocation();
+                return;
+            }
+            
+            // 사용자 메시지 표시
+            addMessage('user', rawQuery, false);
+            setControlsDisabled(true);
+            initialActions.classList.add('hidden');
+
+            // 2. LLM API 사용 시도 (API가 사용 가능한 경우)
+            if (API_AVAILABLE) {
+                addMessage('bot', `🤖 "${rawQuery}"에서 위치를 분석하고 있습니다...`, false);
+                
+                const llmResult = await extractLocationWithLLM(rawQuery);
+                
+                console.log('[DEBUG] llmResult:', llmResult);
+                
+                if (llmResult && llmResult.success) {
+                    const shelters = llmResult.shelters || [];
+                    const message = llmResult.message || "";
+                    
+                    console.log('[DEBUG] success=true, shelters 개수:', shelters.length, 'message:', message);
+                    
+                    // CASE 1: 대피소 검색 결과가 있는 경우 (find_shelter)
+                    if (shelters.length > 0) {
+                        const locationName = llmResult.location;
+                        const coords = llmResult.coordinates;
+                        console.log('[DEBUG] 대피소 검색 - location:', locationName, 'coords:', coords);
+                        addMessage('bot', `✅ "${locationName}" 주변 대피소를 찾았습니다!`, false);
+                        displayLLMShelterResults(locationName, coords, shelters);
+                        return;
+                    }
+                    
+                    // CASE 2: 재난행동요령 또는 일반대화 응답 (disaster_guide, general_chat)
+                    if (message) {
+                        // 메시지를 줄바꿈 처리하여 가독성 향상
+                        const formattedMessage = message.replace(/\n/g, '<br>');
+                        addMessage('bot', `<div class="text-white font-medium leading-relaxed bg-gray-800 bg-opacity-50 p-4 rounded-lg">${formattedMessage}</div>`, false);
+                        setControlsDisabled(false);
+                        showActionButtons(true);
+                        return;
+                    }
+                    
+                    // CASE 3: success이지만 shelters도 없고 message도 없는 경우 (예외)
+                    addMessage('bot', '⚠️ 응답을 받았지만 내용이 없습니다.', false);
+                    setControlsDisabled(false);
+                    showActionButtons(true);
+                    return;
+                    
+                } else if (llmResult && !llmResult.success) {
+                    // LLM이 실패한 경우
+                    const errorMessage = llmResult.message || "지명을 인식하지 못했습니다.";
+                    
+                    // 네이버 API로 폴백하지 않고 에러 메시지만 표시
+                    addMessage('bot', `<span class="text-yellow-300">⚠️ ${errorMessage}</span>`, false);
+                    setControlsDisabled(false);
+                    showActionButtons(true);
+                    return;
+                }
+            }
+
+            // 3. API가 없는 경우: 에러 메시지 표시
+            addMessage('bot', '<span class="text-red-300">⚠️ 서버 API를 사용할 수 없습니다. 서버가 실행 중인지 확인해주세요.</span>', false);
+            setControlsDisabled(false);
+            showActionButtons(true);
+        }
+        
+        // LLM 결과로 대피소 표시
+        function displayLLMShelterResults(locationName, coords, shelters) {
+            console.log('=== displayLLMShelterResults 호출 ===');
+            console.log('locationName:', locationName);
+            console.log('coords:', coords);
+            console.log('coords[0] (lat):', coords[0]);
+            console.log('coords[1] (lon):', coords[1]);
+            console.log('shelters:', shelters);
+            
+            if (!shelters || shelters.length === 0) {
+                addMessage('bot', `<span class="text-red-500 font-bold">"${locationName}" 근처에 대피소를 찾을 수 없습니다.</span>`, false);
+                setControlsDisabled(false);
+                showActionButtons(true);
+                return;
+            }
+            
+            // 첫 번째 대피소를 기준으로 결과 표시 (가장 가까운)
+            const nearestShelter = shelters[0];
+            
+            // 거리 표시 (API에서 distance 필드 제공)
+            const distanceText = nearestShelter.distance 
+                ? `<p class="mt-2 text-md">📍 검색 위치에서 <span class="text-yellow-300 font-bold">${nearestShelter.distance.toFixed(2)} km</span> 거리</p>`
+                : '';
+            
+            // 모든 대피소 목록 생성 (드롭다운용)
+            let shelterListHtml = '';
+            shelters.forEach((shelter, idx) => {
+                const distText = shelter.distance ? `${shelter.distance.toFixed(2)}km` : '';
+                const badge = idx === 0 ? '🏆 ' : `${idx + 1}. `;
+                shelterListHtml += `
+                    <div class="mt-1 text-xs ${idx === 0 ? 'font-bold text-yellow-300' : 'opacity-80'}">
+                        ${badge}${shelter.name} (${distText})
+                        <a href="https://map.kakao.com/link/map/${encodeURIComponent(shelter.name)},${shelter.lat},${shelter.lon}" 
+                           target="_blank" class="ml-1 text-blue-300 hover:text-blue-100">🔗</a>
+                    </div>
+                `;
+            });
+            
+            // 검색 위치 중심 카카오맵 링크 (지도 중심 좌표)
+            const kakaoMapUrl = `https://map.kakao.com/link/map/${encodeURIComponent(locationName)},${coords[0]},${coords[1]}`;
+            
+            const message = `
+                <p class="text-lg font-bold">${nearestShelter.name}</p>
+                <p class="text-sm">(${nearestShelter.address})</p>
+                ${distanceText}
+                <p class="mt-1 text-md">수용인원: <span class="text-yellow-300 font-bold">${nearestShelter.capacity.toLocaleString()}명</span></p>
+                <p class="mt-1 text-sm opacity-80">🏢 총 ${shelters.length}개 대피소 표시됨</p>
+                <details class="mt-2">
+                    <summary class="cursor-pointer text-sm text-blue-300 hover:text-blue-100">📋 전체 대피소 목록 보기</summary>
+                    <div class="mt-1 ml-2 max-h-40 overflow-y-auto">
+                        ${shelterListHtml}
+                    </div>
+                </details>
+                <p class="mt-2">
+                    <a href="${kakaoMapUrl}" target="_blank" class="inline-block bg-yellow-500 text-gray-900 px-4 py-2 rounded-lg text-sm font-bold hover:bg-yellow-600 transition duration-150">
+                        🗺️ 카카오맵에서 크게 보기
+                    </a>
+                </p>
+                <p class="mt-1 text-xs opacity-60">💡 위 링크는 검색 위치 중심으로 지도를 엽니다. 각 대피소 링크(🔗)를 클릭하면 해당 위치로 이동합니다.</p>
+            `;
+            addMessage('bot', message, true);
+            
+            // 지도에 표시 (여러 대피소)
+            showMapWithMultipleShelters(coords[0], coords[1], shelters, locationName);
+            
+            setControlsDisabled(false);
+            showActionButtons(true);
+        }
+        
+        // 모든 정보창 닫기
+        function closeAllInfoWindows() {
+            openInfoWindows.forEach(iw => iw.close());
+            openInfoWindows = [];
+        }
+        
+        // 여러 대피소를 지도에 표시
+        function showMapWithMultipleShelters(centerLat, centerLon, shelters, locationName) {
+            if (typeof naver === 'undefined' || !naver.maps) {
+                console.log("네이버 맵 API가 로드되지 않았습니다.");
+                return;
+            }
+            
+            const mapContainer = document.getElementById('map');
+            const centerPos = new naver.maps.LatLng(centerLat, centerLon);
+            
+            if (!map) {
+                map = new naver.maps.Map('map', {
+                    center: centerPos,
+                    zoom: 14
+                });
+                
+                // 지도 클릭 시 모든 정보창 닫기
+                naver.maps.Event.addListener(map, 'click', () => {
+                    closeAllInfoWindows();
+                });
+            } else {
+                // 지도 크기 강제 갱신
+                map.setSize(new naver.maps.Size(mapContainer.offsetWidth, mapContainer.offsetHeight));
+                map.setCenter(centerPos);
+                map.setZoom(14);
+            }
+            
+            // 기존 정보창 모두 닫기
+            closeAllInfoWindows();
+            
+            // 기존 마커 제거
+            if (userMarker) userMarker.setMap(null);
+            shelterMarkers.forEach(m => m.setMap(null));
+            shelterMarkers = [];
+            
+            // 중심점 마커 (검색 위치) - 말풍선 스타일
+            const displayName = locationName.length > 6 ? locationName.slice(0, 6) + '..' : locationName;
+            userMarker = new naver.maps.Marker({
+                map: map,
+                position: centerPos,
+                icon: {
+                    content: `
+                        <div class="location-marker-container" style="position:relative;display:inline-flex;flex-direction:column;align-items:center;">
+                            <div style="background-color:#4299E1;color:white;padding:6px 10px;border-radius:12px;font-size:12px;font-weight:bold;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.3);">
+                                📍 ${displayName}
+                            </div>
+                            <div style="width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:10px solid #4299E1;margin-top:-1px;"></div>
+                        </div>
+                    `,
+                    size: new naver.maps.Size(100, 50),
+                    anchor: new naver.maps.Point(50, 50)
+                },
+                title: locationName
+            });
+            
+            // 대피소 마커들
+            const bounds = new naver.maps.LatLngBounds(centerPos, centerPos);
+            
+            shelters.forEach((shelter, index) => {
+                const shelterPos = new naver.maps.LatLng(shelter.lat, shelter.lon);
+                bounds.extend(shelterPos);
+                
+                // 첫 번째 대피소(가장 가까운)는 빨간색 마커, 나머지는 기본 마커
+                const isNearest = index === 0;
+                const markerOptions = {
+                    map: map,
+                    position: shelterPos
+                };
+                
+                // 가장 가까운 대피소는 빨간색 마커 아이콘 사용
+                if (isNearest) {
+                    markerOptions.icon = {
+                        url: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',
+                        size: new naver.maps.Size(32, 32),
+                        anchor: new naver.maps.Point(16, 32)
+                    };
+                }
+                
+                const marker = new naver.maps.Marker(markerOptions);
+                
+                // 클릭 시 정보창 표시
+                const distanceInfo = shelter.distance 
+                    ? `<span style="font-size:11px;color:#2563EB;">거리: ${shelter.distance.toFixed(2)}km</span><br>` 
+                    : '';
+                const nearestBadge = isNearest 
+                    ? `<span style="display:inline-block;background:#E53E3E;color:white;font-size:10px;padding:2px 6px;border-radius:10px;margin-bottom:4px;">🏆 가장 가까운 대피소</span><br>` 
+                    : '';
+                const infoWindow = new naver.maps.InfoWindow({
+                    content: `
+                        <div style="padding:10px;max-width:200px;">
+                            ${nearestBadge}
+                            <strong>${shelter.name}</strong><br>
+                            <span style="font-size:12px;color:#666;">${shelter.address}</span><br>
+                            ${distanceInfo}
+                            <span style="font-size:11px;color:#E53E3E;">수용인원: ${shelter.capacity.toLocaleString()}명</span>
+                        </div>
+                    `
+                });
+                
+                naver.maps.Event.addListener(marker, 'click', () => {
+                    // 기존 정보창 모두 닫고 새 정보창 열기
+                    closeAllInfoWindows();
+                    infoWindow.open(map, marker);
+                    openInfoWindows.push(infoWindow);
+                });
+                
+                shelterMarkers.push(marker);
+            });
+            
+            // 모든 마커가 보이도록 뷰포트 조정
+            map.fitBounds(bounds, { padding: 50 });
+            
+            // 지도 크기 강제 갱신 (fitBounds 후 지연 실행)
+            setTimeout(() => {
+                const mapContainer = document.getElementById('map');
+                if (map && mapContainer) {
+                    map.setSize(new naver.maps.Size(mapContainer.offsetWidth, mapContainer.offsetHeight));
+                }
+            }, 100);
+            
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+
+        // 버튼 표시 함수
+        function showActionButtons(enableControls = true) {
+            // API 사용 가능하면 버튼 표시
+            if (enableControls && API_AVAILABLE) {
+                initialActions.classList.remove('hidden');
+            } else {
+                initialActions.classList.add('hidden');
+            }
+
+            // 컨트롤러 활성화
+            if (API_AVAILABLE) {
+                setControlsDisabled(!enableControls);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            // API 상태 확인
+            const apiStatus = await checkApiStatus();
+            
+            if (API_AVAILABLE) {
+                initialMessageEl.innerHTML = '<span class="text-purple-500 text-sm font-semibold">저는 MCK입니다 🤖</span><br><span class="text-blue-600 font-bold">🚨 긴급 상황 시 대피소와 재난 행동요령을 안내합니다!</span><br><span class="text-gray-600">주소나 장소명을 입력하거나 "현위치" 버튼으로 가장 가까운 대피소를 찾아보세요.</span>';
+                setControlsDisabled(false);
+                showActionButtons(true);
+                chatInput.focus();
+            } else {
+                initialMessageEl.innerHTML = '<span class="text-red-500 font-bold">⚠️ 서버에 연결할 수 없습니다. FastAPI 서버가 실행 중인지 확인해주세요.</span>';
+            }
+        });
+
+    </script>
+
+</body>
+</html>
