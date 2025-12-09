@@ -133,7 +133,7 @@ llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
 # 대피소 검색 체인
 shelter_rag_chain = (
-    {
+    {                
         "context": shelter_hybrid_retriever | RunnableLambda(format_docs),
         "question": RunnablePassthrough()
     }
@@ -561,8 +561,8 @@ def interactive_chat():
     print("명령어: '/exit', '/clear', '/verbose', '/stream'")
     print()
     
-    verbose = False
-    stream = False
+    verbose = True
+    stream = True
     
     while True:
         try:
