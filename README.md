@@ -50,7 +50,7 @@ flowchart TD
 ---
 
 ## 👥 팀구성
-| <img src="./image/쿼카.jpg" width="150"> <br> 문창교 |  <img src="./image/dak.jpg" width="150"> <br> 권규리 |  <img src="./image/rich.jpg" width="150"> <br> 김황현 |  <img src="./image/loopy.jpg" width="150"> <br> 김효빈 |  <img src="./image/ham.jpg" width="150"> <br> 이승규 |
+| <img src="./image/쿼카.jpeg" width="150"> <br> 문창교 |  <img src="./image/dak.jpeg" width="150"> <br> 권규리 |  <img src="./image/rich.jpeg" width="150"> <br> 김황현 |  <img src="./image/loopy.jpeg" width="150"> <br> 김효빈 |  <img src="./image/ham.jpeg" width="150"> <br> 이승규 |
 |:------:|:------:|:------:|:------:|:------:|
 | <a href="https://github.com/kimobi"><img src="https://img.shields.io/badge/GitHub-kimobi-blue?logo=github"></a> | <a href="https://github.com/hyeonnll"><img src="https://img.shields.io/badge/GitHub-hyeonnll-yellow?logo=github"></a> | <a href="https://github.com/kimobi"><img src="https://img.shields.io/badge/GitHub-kimobi-green?logo=github"></a> | <a href="https://github.com/mansio0314"><img src="https://img.shields.io/badge/GitHub-mansio0314-lightblue?logo=github"></a> | <a href="https://github.com/mminguu"><img src="https://img.shields.io/badge/GitHub-mminguu-pink?logo=github"></a> |
 
