@@ -31,3 +31,4 @@ def create_embeddings_and_vectordb(documents: List[Document]):
     )
 
     print(f"VectorDB 생성 완료: {len(documents)}개 문서 저장")
+    return embeddings, vectorstore
