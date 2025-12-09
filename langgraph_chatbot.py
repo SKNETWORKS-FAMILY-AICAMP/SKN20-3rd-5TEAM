@@ -118,13 +118,14 @@ RAG_PROMPT = ChatPromptTemplate.from_messages([
 
 # 3-2. Document 포맷팅 함수
 def format_docs(docs: List[Document]) -> str:
-    """검색된 문서를 포맷팅"""
+    """검색된 문서를 포맷팅 (메타데이터 포함)"""
     if not docs:
         return "관련 문서를 찾을 수 없습니다."
     
     formatted = []
     for i, doc in enumerate(docs, 1):
-        formatted.append(f"[문서 {i}]\n{doc.page_content}")
+        metadata_str = ", ".join(f"{k}: {v}" for k, v in doc.metadata.items())
+        formatted.append(f"[문서 {i} | {metadata_str}]\n{doc.page_content}")
     
     return "\n\n".join(formatted)
 
@@ -223,9 +224,8 @@ query_rewrite_chain = (
     | StrOutputParser()
 )
 
-# 5. 도구(Tools) 정의 - Query Rewriting 적용
-
 @tool
+# 5. 도구(Tools) 정의 - Query Rewriting 적용
 def search_shelter(query: str) -> str:
     """
     주소, 지역명, 시설명 등을 입력받아 '민방위 대피소' 정보를 검색합니다.
@@ -267,7 +267,7 @@ def search_shelter(query: str) -> str:
     
     except Exception as e:
         return f"대피소 검색 중 오류: {str(e)}"
-
+    
 @tool
 def search_guideline(query: str) -> str:
     """
@@ -434,11 +434,25 @@ def rag_node(state: HybridAgentState):
     query_type = state.get("query_type", "complex")
     
     try:
+        # 질문 재정의 적용
+        rewritten_query = query_rewrite_chain.invoke({"original_query": query})
+        print(f"🔄 [RAG] 원본: {query}")
+        print(f"🔍 [RAG] 재정의: {rewritten_query}")
+        
         # LCEL 체인 선택 및 실행
         if query_type == "simple_shelter":
-            answer = shelter_rag_chain.invoke(query)
+            answer = shelter_rag_chain.invoke(rewritten_query)
+            
+            # 검색 결과 확인 (디버깅용)
+            docs = shelter_hybrid_retriever.invoke(rewritten_query)
+            print(f"📚 검색된 문서 수: {len(docs)}")
+            if docs:
+                print(f"📍 첫 번째 문서: {docs[0].metadata.get('facility_name', '알 수 없음')}")
         else:  # simple_guideline
-            answer = guideline_rag_chain.invoke(query)
+            answer = guideline_rag_chain.invoke(rewritten_query)
+            
+            docs = guideline_hybrid_retriever.invoke(rewritten_query)
+            print(f"📚 검색된 문서 수: {len(docs)}")
         
         return {"messages": [AIMessage(content=answer)]}
     
@@ -455,7 +469,7 @@ AGENT_SYSTEM_PROMPT = """당신은 대한민국의 재난 안전 도우미 AI입
 4. 질문이 재난/대피소와 무관하면 "죄송하지만 재난 안전과 관련된 질문에만 답변드릴 수 있습니다."라고 답하세요.
 
 **도구 사용 가이드**:
-- 특정 지역 대피소 검색 → search_shelter
+- 특정 지역 대피소 검색 (주소, 시설명, 개수 포함) → **search_shelter** 
 - 재난 행동요령 → search_guideline  
 - 수용인원 기준 통계 → count_shelters_by_capacity
 - 전체 대피소 통계 → get_shelter_statistics
