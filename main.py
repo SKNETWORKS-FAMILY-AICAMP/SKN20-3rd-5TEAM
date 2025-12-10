@@ -169,16 +169,6 @@ class EnsembleRetriever:
                 unique_docs.append(doc)
         return unique_docs[:10]
 
-# OpenAI 클라이언트 초기화
-try:
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-except (ImportError, Exception) as e:
-    print(f"[WARNING] OpenAI 클라이언트 초기화 실패: {e}")
-    OPENAI_AVAILABLE = False
-    openai_client = None
-
 # -----------------------------------------------------------------------------
 # 2. Pydantic 모델 정의 (Request/Response 스키마)
 # -----------------------------------------------------------------------------
@@ -201,150 +191,6 @@ class ChatbotRequest(BaseModel):
 class ChatbotResponse(BaseModel):
     response: str
     session_id: str
-
-
-# -----------------------------------------------------------------------------
-# 2-1. 의도 분류 함수 (find_location.py의 llm_intent_classifier 참조)
-# -----------------------------------------------------------------------------
-
-def classify_user_intent(query: str) -> str:
-    """
-    사용자 질문의 의도를 분류합니다.
-    
-    Returns:
-        "find_shelter": 대피소 찾기 의도
-        "disaster_guide": 재난행동요령 질문
-        "general_chat": 일반 대화
-    """
-    # 1차: 명확한 키워드가 있으면 바로 분류 (빠른 경로)
-    if "대피소" in query or "피난" in query or "피난처" in query:
-        print(f"  [의도분류] 대피소 키워드 발견 -> find_shelter")
-        return "find_shelter"
-    
-    if not OPENAI_AVAILABLE or not openai_client:
-        print("  [의도분류] OpenAI 사용 불가 - 키워드 기반 분류로 대체")
-        return keyword_intent_classifier(query)
-    
-    try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": """당신은 사용자 질문의 의도를 분류하는 전문가입니다.
-
-사용자 질문을 세 가지 카테고리로 분류하세요:
-
-1. **대피소 찾기 (find_shelter)**:
-   - 대피소, 피난처, 안전한 장소를 찾는 질문
-   - **지역명, 장소명, 건물명, 랜드마크만 입력된 경우 (매우 중요!)**
-   - 주소, 동네, 구, 시, 역, 건물 등의 위치 정보
-   - 예: "강남역 대피소", "서울역", "마포구", "잠실 롯데월드", "명동", "여의도", "근처 피난처"
-
-2. **재난행동요령 (disaster_guide)**:
-   - 재난 상황 대처 방법을 묻는 질문
-   - 행동 요령, 대피 방법, 안전 수칙 문의
-   - "어떻게", "방법", "대처", "행동요령" 등의 의문문
-   - 예: "지진 났을 때 어떻게 해?", "화재 발생시 행동요령", "태풍 대비법"
-
-3. **일반 대화 (general_chat)**:
-   - 인사, 도움말, 사용법 문의
-   - 대피소나 재난과 관련 없는 질문
-   - 예: "안녕하세요", "도움말", "사용법"
-
-**중요**: 지역명이나 장소명만 언급되면 무조건 find_shelter로 분류하세요!
-
-응답 형식 (JSON):
-{"intent": "find_shelter" 또는 "disaster_guide" 또는 "general_chat", "confidence": 0.0~1.0, "reason": "판단 이유"}"""
-                },
-                {
-                    "role": "user",
-                    "content": query
-                }
-            ],
-            temperature=0,
-            max_tokens=150,
-            response_format={"type": "json_object"}
-        )
-        
-        result = json.loads(response.choices[0].message.content)
-        intent = result.get("intent", "general_chat")
-        confidence = result.get("confidence", 0.0)
-        reason = result.get("reason", "")
-        
-        print(f"  [의도분류] LLM 결과: {intent} (신뢰도: {confidence}, 이유: {reason})")
-        
-        # 신뢰도가 낮으면 키워드 기반으로 재확인
-        if confidence < 0.6:
-            print(f"  [의도분류] 신뢰도 낮음({confidence}) - 키워드 기반으로 재확인")
-            return keyword_intent_classifier(query)
-        
-        return intent
-        
-    except Exception as e:
-        print(f"  [의도분류] LLM 오류: {e} - 키워드 기반으로 대체")
-        return keyword_intent_classifier(query)
-
-
-def keyword_intent_classifier(query: str) -> str:
-    """
-    키워드 기반 의도 분류 (LLM 사용 불가 시 폴백)
-    """
-    print(f"  [키워드분류] 쿼리 분석: '{query}'")
-    
-    # 대피소 관련 키워드
-    shelter_keywords = ["대피소", "대피", "피난", "피난처", "안전한 곳", "숨을 곳", "비상대피", "근처", "주변"]
-    
-    # 재난행동요령 관련 키워드
-    disaster_keywords = [
-        "지진", "화재", "태풍", "홍수", "산사태", "폭풍", "해일", "쓰나미", "tsunami",
-        "행동요령", "대처법", "대처방법", "대비", "안전수칙", "어떻게", "방법", "해야",
-        "화산", "방사능", "가스", "댐", "산불", "폭발", "분화", "낙뢰",
-        "발생", "났을", "일어나", "생기면", "경우"
-    ]
-    
-    # 한국 지역명 패턴
-    location_pattern = r'(구|동|역|시|읍|면|리|로|길|대로)'
-    
-    # 일반 대화 키워드
-    general_keywords = ["안녕", "도움말", "사용법", "설명", "뭐야", "날씨", "고마워", "감사"]
-    
-    # 매칭된 키워드 추적
-    matched_shelter = [k for k in shelter_keywords if k in query]
-    matched_disaster = [k for k in disaster_keywords if k in query]
-    matched_general = [k for k in general_keywords if k in query]
-    
-    print(f"  [키워드분류] 대피소 키워드: {matched_shelter}")
-    print(f"  [키워드분류] 재난 키워드: {matched_disaster}")
-    print(f"  [키워드분류] 일반 키워드: {matched_general}")
-    
-    # 1. 일반 대화 먼저 확인
-    if matched_general and not (matched_shelter or matched_disaster):
-        print(f"  [키워드분류] 결과: general_chat")
-        return "general_chat"
-    
-    # 2. 재난행동요령 확인
-    if matched_disaster:
-        # 단, 대피소 키워드도 함께 있으면 대피소 검색으로 간주
-        if matched_shelter:
-            print(f"  [키워드분류] 결과: find_shelter (재난+대피소)")
-            return "find_shelter"
-        print(f"  [키워드분류] 결과: disaster_guide")
-        return "disaster_guide"
-    
-    # 3. 대피소 검색 확인
-    if matched_shelter or re.search(location_pattern, query):
-        print(f"  [키워드분류] 결과: find_shelter")
-        return "find_shelter"
-    
-    # 4. 짧은 질문은 대피소 검색으로 간주 (지역명일 가능성)
-    if len(query.strip()) <= 5:
-        print(f"  [키워드분류] 결과: find_shelter (짧은 쿼리)")
-        return "find_shelter"
-    
-    # 5. 기본값은 일반 대화
-    print(f"  [키워드분류] 결과: general_chat (기본값)")
-    return "general_chat"
 
 
 # -----------------------------------------------------------------------------
@@ -1075,203 +921,135 @@ async def extract_location(request: LocationExtractRequest = Body(...)):
             # 에러 발생 시 아래 기존 로직으로 폴백
     
     elif use_agent and langgraph_app is None:
-        print(f"[WARNING] LangGraph Agent가 초기화되지 않음, 기존 로직 사용")
-    
-    # =========================================================================
-    # 기존 로직 (LangGraph 실패 시 폴백)
-    # =========================================================================
-    
-    # -----------------------
-    # 1차: LLM 기반 의도 분류
-    # -----------------------
-    intent = classify_user_intent(query)
-    print(f"[API] 분류된 의도: '{intent}'")
-    
-    # -----------------------
-    # 2차: 의도별 처리 로직
-    # -----------------------
-    
-    # CASE 1: 일반 대화
-    if intent == "general_chat":
-        print(f"[API] general_chat 처리")
+        print(f"[WARNING] LangGraph Agent가 초기화되지 않음")
         return LocationExtractResponse(
-            success=True,
-            message="안녕하세요! 저는 대피소 안내 챗봇입니다. 지역명을 입력하시면 주변 대피소를 찾아드리고, 재난 상황에 대한 행동요령도 안내해 드립니다."
+            success=False,
+            message="챗봇 시스템이 초기화되지 않았습니다. 잠시 후 다시 시도해주세요."
         )
     
-    # CASE 2: 재난행동요령 관련 질문
-    elif intent == "disaster_guide":
-        # Vector DB에서 재난행동요령 문서 검색
-        print(f"[DEBUG] 재난행동요령 검색 쿼리: {query}")
-        
-        # filter를 사용하여 disaster_guideline 타입만 검색
-        try:
-            results = vectorstore.similarity_search(
-                query, 
-                k=5,
-                filter={"type": "disaster_guideline"}
-            )
-            print(f"[DEBUG] disaster_guideline 필터링 검색 결과: {len(results)}개")
-        except:
-            # filter 지원 안 되면 전체 검색 후 필터링
-            all_results = vectorstore.similarity_search(query, k=20)
-            results = [doc for doc in all_results if doc.metadata.get("type") == "disaster_guideline"]
-            print(f"[DEBUG] 전체 검색 후 필터링 결과: {len(results)}개")
-        
-        # 검색 결과 디버깅
-        for i, doc in enumerate(results[:3]):
-            doc_type = doc.metadata.get("type", "NONE")
-            category = doc.metadata.get("category", "N/A")
-            keyword = doc.metadata.get("keyword", "N/A")
-            print(f"[DEBUG] 문서 {i+1}: type={doc_type}, category={category}, keyword={keyword}")
-            print(f"[DEBUG]   내용: {doc.page_content[:150]}...")
-        
-        # 재난행동요령 문서가 없으면 에러
-        if not results or len(results) == 0:
-            print("[ERROR] VectorStore에 disaster_guideline 문서가 없습니다!")
-            return LocationExtractResponse(
-                success=False, 
-                message="재난행동요령 데이터베이스에 문제가 있습니다. 시스템 관리자에게 문의하세요."
-            )
-        
-        # 가장 관련성 높은 문서 선택
-        disaster_doc = results[0]
-        
-        print(f"[DEBUG] 선택된 재난문서 - category: {disaster_doc.metadata.get('category')}, keyword: {disaster_doc.metadata.get('keyword')}")
-        print(f"[DEBUG] 문서 길이: {len(disaster_doc.page_content)}")
-        
-        # 응답 메시지 구성 (카테고리와 키워드 정보 포함)
-        category = disaster_doc.metadata.get('category', '')
-        keyword = disaster_doc.metadata.get('keyword', '')
-        header = f"📋 {category} - {keyword}\n\n" if category and keyword else ""
-        
-        return LocationExtractResponse(
-            success=True,
-            location=None,
-            coordinates=None,
-            shelters=[],
-            total_count=0,
-            message=header + disaster_doc.page_content[:1500]  # 답변 길이 증가
-        )
-        
-    # CASE 3: 대피소 관련 질문
-    elif intent == "find_shelter":
-        print(f"[API] find_shelter 처리 시작 - query: '{query}'")
-        
-        # =====================================================================
-        # STEP 1: 사용자 쿼리에서 순수 지명만 추출 (불필요한 단어 제거)
-        # =====================================================================
-        # 예: "강남역 대피소 알려줘" -> "강남역"
-        # 예: "명동 근처 피난소" -> "명동"
+    # =========================================================================
+    # 기존 로직 (단순 대피소 위치 검색만 처리)
+    # =========================================================================
+    # 주의: 이 코드는 "강남역 대피소"와 같은 단순 위치 질문만 처리합니다.
+    # 재난 행동요령, 통계, 일반 대화 등은 위의 LangGraph Agent가 처리합니다.
+    # =========================================================================
+    
+    print(f"[API] 단순 대피소 위치 검색 처리 시작 - query: '{query}'")
+    
+    # =====================================================================
+    # STEP 1: 사용자 쿼리에서 순수 지명만 추출 (불필요한 단어 제거)
+    # =====================================================================
+    # 예: "강남역 대피소 알려줘" -> "강남역"
+    # 예: "명동 근처 피난소" -> "명동"
+    location_query = query
+    
+    # 대피소 관련 키워드 제거 리스트
+    remove_keywords = [
+        "대피소", "피난소", "피난처", "근처", "주변", "가까운", "어디", "위치",
+        "찾아줘", "알려줘", "검색", "보여줘", "있어", "는?", "은?", "?", "!",
+        "좀", "요", "주세요", "해줘", "해주세요", "있나요", "있어요"
+    ]
+    
+    for keyword in remove_keywords:
+        location_query = location_query.replace(keyword, "")
+    
+    # 공백 정리 (여러 공백을 하나로 통합)
+    location_query = " ".join(location_query.split()).strip()
+    
+    print(f"[DEBUG] 정제된 위치 쿼리: '{location_query}'")
+    
+    # 정제 후 비어있으면 원본 쿼리 사용
+    if not location_query:
         location_query = query
+        print(f"[DEBUG] 정제 결과가 비어있어 원본 쿼리 사용")
+    
+    # =====================================================================
+    # STEP 2: 카카오 로컬 API 키 확인
+    # =====================================================================
+    kakao_key = os.getenv("KAKAO_REST_API_KEY")
+    if not kakao_key:
+        print(f"[ERROR] KAKAO_REST_API_KEY 없음")
+        return LocationExtractResponse(success=False, message="KAKAO_REST_API_KEY 환경변수가 없습니다.")
+    
+    # =====================================================================
+    # STEP 3: 여러 지명이 포함된 경우 우선순위 판단
+    # =====================================================================
+    # 예: "잠실 롯데월드" -> "롯데월드" 우선 선택 (관광명소)
+    # 우선순위: 1=관광명소/문화시설, 2=교통시설(역), 3=행정구역, 4=기타
+    location_parts = location_query.split()
+    selected_location = location_query
+    
+    if len(location_parts) > 1:
+        print(f"[DEBUG] 여러 지명 감지: {location_parts}, 카카오 API로 우선순위 판단")
         
-        # 대피소 관련 키워드 제거 리스트
-        remove_keywords = [
-            "대피소", "피난소", "피난처", "근처", "주변", "가까운", "어디", "위치",
-            "찾아줘", "알려줘", "검색", "보여줘", "있어", "는?", "은?", "?", "!",
-            "좀", "요", "주세요", "해줘", "해주세요", "있나요", "있어요"
-        ]
-        
-        for keyword in remove_keywords:
-            location_query = location_query.replace(keyword, "")
-        
-        # 공백 정리 (여러 공백을 하나로 통합)
-        location_query = " ".join(location_query.split()).strip()
-        
-        print(f"[DEBUG] 정제된 위치 쿼리: '{location_query}'")
-        
-        # 정제 후 비어있으면 원본 쿼리 사용
-        if not location_query:
-            location_query = query
-            print(f"[DEBUG] 정제 결과가 비어있어 원본 쿼리 사용")
-        
-        # =====================================================================
-        # STEP 2: 카카오 로컬 API 키 확인
-        # =====================================================================
-        kakao_key = os.getenv("KAKAO_REST_API_KEY")
-        if not kakao_key:
-            print(f"[ERROR] KAKAO_REST_API_KEY 없음")
-            return LocationExtractResponse(success=False, message="KAKAO_REST_API_KEY 환경변수가 없습니다.")
-        
-        # =====================================================================
-        # STEP 3: 여러 지명이 포함된 경우 우선순위 판단
-        # =====================================================================
-        # 예: "잠실 롯데월드" -> "롯데월드" 우선 선택 (관광명소)
-        # 우선순위: 1=관광명소/문화시설, 2=교통시설(역), 3=행정구역, 4=기타
-        location_parts = location_query.split()
-        selected_location = location_query
-        
-        if len(location_parts) > 1:
-            print(f"[DEBUG] 여러 지명 감지: {location_parts}, 카카오 API로 우선순위 판단")
-            
-            url = "https://dapi.kakao.com/v2/local/search/keyword.json"
-            headers = {"Authorization": f"KakaoAK {kakao_key}"}
-            
-            best_candidate = None
-            best_priority = 999
-            
-            # 카테고리별 우선순위 정의
-            priority_categories = {
-                1: ["관광명소", "문화시설", "여가시설", "공공기관", "테마파크"],
-                2: ["교통,수송", "지하철역"],
-                3: ["행정구역"],
-            }
-            
-            # 각 지명을 카카오 API로 검색하여 카테고리 확인
-            for part in location_parts:
-                resp = requests.get(url, headers=headers, params={"query": part, "size": 5})
-                if resp.status_code == 200:
-                    docs = resp.json().get("documents", [])
-                    if docs:
-                        doc = docs[0]
-                        category_name = doc.get("category_name", "")
-                        print(f"[DEBUG] '{part}' 검색 결과 - category: {category_name}")
-                        
-                        # 카테고리 우선순위 판단
-                        priority = 4  # 기본값 (기타)
-                        for pri, keywords in priority_categories.items():
-                            if any(keyword in category_name for keyword in keywords):
-                                priority = pri
-                                break
-                        
-                        # 더 높은 우선순위(낮은 숫자)면 선택
-                        if priority < best_priority:
-                            best_priority = priority
-                            best_candidate = part
-                            print(f"[DEBUG] 우선순위 {priority}: '{part}' 선택 (category: {category_name})")
-            
-            # 우선순위가 가장 높은 지명 선택
-            if best_candidate:
-                selected_location = best_candidate
-                print(f"[DEBUG] 최종 선택된 위치: '{selected_location}' (우선순위: {best_priority})")
-            else:
-                # API 검색 실패시 첫 번째 지명 사용
-                selected_location = location_parts[0]
-                print(f"[DEBUG] API 검색 실패, 첫 번째 지명 사용: '{selected_location}'")
-        
-        location_query = selected_location
-        
-        # =====================================================================
-        # STEP 4: 카카오 API를 사용하여 최종 위치 검색 (위/경도 좌표 획득)
-        # =====================================================================
         url = "https://dapi.kakao.com/v2/local/search/keyword.json"
         headers = {"Authorization": f"KakaoAK {kakao_key}"}
-        params = {"query": location_query, "size": 1}
         
-        print(f"[DEBUG] 카카오 API 최종 검색 - query: '{location_query}'")
-        resp = requests.get(url, headers=headers, params=params)
-        print(f"[DEBUG] 카카오 API 응답 - status: {resp.status_code}")
+        best_candidate = None
+        best_priority = 999
         
-        if resp.status_code != 200:
-            return LocationExtractResponse(success=False, message=f"카카오 API 오류: {resp.status_code}")
-            
-        data = resp.json()
-        print(f"[DEBUG] 카카오 API 결과 개수: {len(data.get('documents', []))}")
+        # 카테고리별 우선순위 정의
+        priority_categories = {
+            1: ["관광명소", "문화시설", "여가시설", "공공기관", "테마파크"],
+            2: ["교통,수송", "지하철역"],
+            3: ["행정구역"],
+        }
         
-        # =====================================================================
-        # 카카오 API 검색 실패 시 LangGraph Agent를 사용한 대피소 검색
-        # =====================================================================
-        if not data.get("documents"):
+        # 각 지명을 카카오 API로 검색하여 카테고리 확인
+        for part in location_parts:
+            resp = requests.get(url, headers=headers, params={"query": part, "size": 5})
+            if resp.status_code == 200:
+                docs = resp.json().get("documents", [])
+                if docs:
+                    doc = docs[0]
+                    category_name = doc.get("category_name", "")
+                    print(f"[DEBUG] '{part}' 검색 결과 - category: {category_name}")
+                    
+                    # 카테고리 우선순위 판단
+                    priority = 4  # 기본값 (기타)
+                    for pri, keywords in priority_categories.items():
+                        if any(keyword in category_name for keyword in keywords):
+                            priority = pri
+                            break
+                    
+                    # 더 높은 우선순위(낮은 숫자)면 선택
+                    if priority < best_priority:
+                        best_priority = priority
+                        best_candidate = part
+                        print(f"[DEBUG] 우선순위 {priority}: '{part}' 선택 (category: {category_name})")
+        
+        # 우선순위가 가장 높은 지명 선택
+        if best_candidate:
+            selected_location = best_candidate
+            print(f"[DEBUG] 최종 선택된 위치: '{selected_location}' (우선순위: {best_priority})")
+        else:
+            # API 검색 실패시 첫 번째 지명 사용
+            selected_location = location_parts[0]
+            print(f"[DEBUG] API 검색 실패, 첫 번째 지명 사용: '{selected_location}'")
+    
+    location_query = selected_location
+    
+    # =====================================================================
+    # STEP 4: 카카오 API를 사용하여 최종 위치 검색 (위/경도 좌표 획득)
+    # =====================================================================
+    url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+    headers = {"Authorization": f"KakaoAK {kakao_key}"}
+    params = {"query": location_query, "size": 1}
+    
+    print(f"[DEBUG] 카카오 API 최종 검색 - query: '{location_query}'")
+    resp = requests.get(url, headers=headers, params=params)
+    print(f"[DEBUG] 카카오 API 응답 - status: {resp.status_code}")
+    
+    if resp.status_code != 200:
+        return LocationExtractResponse(success=False, message=f"카카오 API 오류: {resp.status_code}")
+        
+    data = resp.json()
+    print(f"[DEBUG] 카카오 API 결과 개수: {len(data.get('documents', []))}")
+    
+    # =====================================================================
+    # 카카오 API 검색 실패 시 LangGraph Agent를 사용한 대피소 검색
+    # =====================================================================
+    if not data.get("documents"):
             print(f"[WARNING] 카카오 API에서 '{location_query}' 위치를 찾지 못함")
             print(f"[INFO] LangGraph Agent를 사용하여 대피소 검색 시도")
             
@@ -1323,116 +1101,112 @@ async def extract_location(request: LocationExtractRequest = Body(...)):
                     message=f"'{location_query}' 위치를 찾을 수 없습니다. 다른 지역명을 입력해 주세요."
                 )
         
-        # =====================================================================
-        # 카카오 API 검색 성공 시 기존 로직 사용 (좌표 기반 대피소 검색)
-        # =====================================================================
-        # - 카카오 API로 획득한 위/경도 좌표 사용
-        # - Haversine 공식으로 사용자 위치 ↔ 대피소 간 직선 거리 계산
-        # - 거리순 정렬 후 가장 가까운 5개 대피소 반환
+    # =====================================================================
+    # 카카오 API 검색 성공 시 기존 로직 사용 (좌표 기반 대피소 검색)
+    # =====================================================================
+    # - 카카오 API로 획득한 위/경도 좌표 사용
+    # - Haversine 공식으로 사용자 위치 ↔ 대피소 간 직선 거리 계산
+    # - 거리순 정렬 후 가장 가까운 5개 대피소 반환
+    
+    # 좌표 추출
+    place = data["documents"][0]
+    lat = float(place["y"])  # 위도
+    lon = float(place["x"])  # 경도
+    place_name = place.get("place_name", location_query)
+    
+    print(f"[DEBUG] 좌표 추출 성공 - place_name: {place_name}, lat: {lat}, lon: {lon}")
+    
+    # =====================================================================
+    # STEP 5: VectorStore에서 모든 대피소 데이터 가져와서 거리 계산
+    # =====================================================================
+    import math
+    
+    def haversine(lat1, lon1, lat2, lon2):
+        """
+        Haversine 공식: 구면상의 두 점 사이의 최단 거리 계산
         
-        # 좌표 추출
-        place = data["documents"][0]
-        lat = float(place["y"])  # 위도
-        lon = float(place["x"])  # 경도
-        place_name = place.get("place_name", location_query)
+        Args:
+            lat1, lon1: 첫 번째 점의 위도/경도 (사용자 위치)
+            lat2, lon2: 두 번째 점의 위도/경도 (대피소 위치)
         
-        print(f"[DEBUG] 좌표 추출 성공 - place_name: {place_name}, lat: {lat}, lon: {lon}")
-        
-        # =====================================================================
-        # STEP 5: VectorStore에서 모든 대피소 데이터 가져와서 거리 계산
-        # =====================================================================
-        import math
-        
-        def haversine(lat1, lon1, lat2, lon2):
-            """
-            Haversine 공식: 구면상의 두 점 사이의 최단 거리 계산
+        Returns:
+            float: 두 점 사이의 거리 (단위: km)
+        """
+        R = 6371  # 지구 반지름 (km)
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        d_phi = math.radians(lat2 - lat1)
+        d_lambda = math.radians(lon2 - lon1)
+        a = math.sin(d_phi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(d_lambda/2)**2
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    
+    # VectorStore에서 shelter 타입 문서만 필터링하여 가져오기
+    # - filter: {"type": "shelter"} 조건으로 대피소 데이터만 추출
+    all_data = vectorstore.get(where={"type": "shelter"})
+    all_metadatas = all_data.get('metadatas', [])
+    
+    print(f"[DEBUG] VectorStore에서 {len(all_metadatas)}개 대피소 메타데이터 가져옴")
+    
+    shelters = []
+    
+    # 각 대피소의 좌표를 사용하여 거리 계산
+    for metadata in all_metadatas:
+        # shelter 타입 문서만 처리 (이중 확인)
+        if metadata.get('type') != 'shelter':
+            continue
             
-            Args:
-                lat1, lon1: 첫 번째 점의 위도/경도 (사용자 위치)
-                lat2, lon2: 두 번째 점의 위도/경도 (대피소 위치)
-            
-            Returns:
-                float: 두 점 사이의 거리 (단위: km)
-            """
-            R = 6371  # 지구 반지름 (km)
-            phi1, phi2 = math.radians(lat1), math.radians(lat2)
-            d_phi = math.radians(lat2 - lat1)
-            d_lambda = math.radians(lon2 - lon1)
-            a = math.sin(d_phi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(d_lambda/2)**2
-            return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        # 좌표 정보 추출 (documents.py에서 영문 키로 저장됨)
+        s_lat = metadata.get('lat')  # 대피소 위도
+        s_lon = metadata.get('lon')  # 대피소 경도
         
-        # VectorStore에서 shelter 타입 문서만 필터링하여 가져오기
-        # - filter: {"type": "shelter"} 조건으로 대피소 데이터만 추출
-        all_data = vectorstore.get(where={"type": "shelter"})
-        all_metadatas = all_data.get('metadatas', [])
-        
-        print(f"[DEBUG] VectorStore에서 {len(all_metadatas)}개 대피소 메타데이터 가져옴")
-        
-        shelters = []
-        
-        # 각 대피소의 좌표를 사용하여 거리 계산
-        for metadata in all_metadatas:
-            # shelter 타입 문서만 처리 (이중 확인)
-            if metadata.get('type') != 'shelter':
-                continue
+        if s_lat is not None and s_lon is not None:
+            try:
+                s_lat = float(s_lat)
+                s_lon = float(s_lon)
                 
-            # 좌표 정보 추출 (documents.py에서 영문 키로 저장됨)
-            s_lat = metadata.get('lat')  # 대피소 위도
-            s_lon = metadata.get('lon')  # 대피소 경도
-            
-            if s_lat is not None and s_lon is not None:
-                try:
-                    s_lat = float(s_lat)
-                    s_lon = float(s_lon)
-                    
-                    # Haversine 공식으로 사용자 위치 ↔ 대피소 간 거리 계산
-                    distance = haversine(lat, lon, s_lat, s_lon)
-                    
-                    # 대피소 정보 객체 생성
-                    shelter_info = {
-                        'name': metadata.get('facility_name', 'N/A'),  # 시설명
-                        'address': metadata.get('address', 'N/A'),     # 주소
-                        'lat': s_lat,                                   # 위도
-                        'lon': s_lon,                                   # 경도
-                        'capacity': int(metadata.get('capacity', 0)),  # 수용인원
-                        'distance': distance                            # 거리 (km)
-                    }
-                    shelters.append(shelter_info)
-                    
-                except (ValueError, TypeError):
-                    # 좌표 변환 실패 시 해당 대피소는 건너뜀
-                    continue
-        
-        print(f"[DEBUG] 총 {len(shelters)}개 대피소의 거리 계산 완료")
-        
-        # =====================================================================
-        # STEP 6: 거리순 정렬 후 상위 5개 반환
-        # =====================================================================
-        shelters.sort(key=lambda x: x['distance'])  # 거리 오름차순 정렬
-        top_shelters = shelters[:5]  # 가장 가까운 5개 선택
-        
-        print(f"[DEBUG] 상위 5개 대피소 선택 완료")
-        for i, s in enumerate(top_shelters):
-            print(f"[DEBUG]   {i+1}. {s['name']} ({s['distance']:.2f}km)")
-        
-        # 결과 반환
-        # - success: True (검색 성공)
-        # - location: 검색된 장소명 (예: "강남역")
-        # - coordinates: (위도, 경도) 튜플
-        # - shelters: 가장 가까운 대피소 5개 리스트
-        # - total_count: VectorDB에 저장된 전체 대피소 개수
-        return LocationExtractResponse(
-            success=True,
-            location=place_name,
-            coordinates=(lat, lon),
-            shelters=top_shelters,
-            total_count=len(all_metadatas),
-            message="OK"
-        )
-        
-    # CASE 3: 기타 질문
-    else:
-        return LocationExtractResponse(success=False, message="대피소/재난행동요령 관련 질문이 아닙니다.")
+                # Haversine 공식으로 사용자 위치 ↔ 대피소 간 거리 계산
+                distance = haversine(lat, lon, s_lat, s_lon)
+                
+                # 대피소 정보 객체 생성
+                shelter_info = {
+                    'name': metadata.get('facility_name', 'N/A'),  # 시설명
+                    'address': metadata.get('address', 'N/A'),     # 주소
+                    'lat': s_lat,                                   # 위도
+                    'lon': s_lon,                                   # 경도
+                    'capacity': int(metadata.get('capacity', 0)),  # 수용인원
+                    'distance': distance                            # 거리 (km)
+                }
+                shelters.append(shelter_info)
+                
+            except (ValueError, TypeError):
+                # 좌표 변환 실패 시 해당 대피소는 건너뜀
+                continue
+    
+    print(f"[DEBUG] 총 {len(shelters)}개 대피소의 거리 계산 완료")
+    
+    # =====================================================================
+    # STEP 6: 거리순 정렬 후 상위 5개 반환
+    # =====================================================================
+    shelters.sort(key=lambda x: x['distance'])  # 거리 오름차순 정렬
+    top_shelters = shelters[:5]  # 가장 가까운 5개 선택
+    
+    print(f"[DEBUG] 상위 5개 대피소 선택 완료")
+    for i, s in enumerate(top_shelters):
+        print(f"[DEBUG]   {i+1}. {s['name']} ({s['distance']:.2f}km)")
+    
+    # 결과 반환
+    # - success: True (검색 성공)
+    # - location: 검색된 장소명 (예: "강남역")
+    # - coordinates: (위도, 경도) 튜플
+    # - shelters: 가장 가까운 대피소 5개 리스트
+    # - total_count: VectorDB에 저장된 전체 대피소 개수
+    return LocationExtractResponse(
+        success=True,
+        location=place_name,
+        coordinates=(lat, lon),
+        shelters=top_shelters,
+        total_count=len(all_metadatas),
+        message="OK"
+    )
 
 
 # -----------------------------------------------------------------------------
