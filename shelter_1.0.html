@@ -287,23 +287,22 @@ async function handleChatInput() {
 
     addMessage("bot", "🤖 입력 내용을 분석 중...");
     const result = await extractLocationWithLLM(q);
-    console.log("result ---"+result);
+    console.log("result ---", result);
     if (!result || !result.success) {
         addMessage("bot", result?.message || "❌ 지명을 인식할 수 없습니다.");
         setControlsDisabled(false);
         return;
     }
 
-    if (result.shelters && result.shelters.length > 0) {
-        print(result.location, result.coordinates, result.shelters)
-        displayShelterResults(result.location, result.coordinates, result.shelters);
-        
-        return;
-    }
-
+    // 1. 메시지가 있으면 먼저 출력
     if (result.message) {
         console.log("result.message", result.message);
         addMessage("bot", result.message.replace(/\n/g,"<br>"));
+    }
+
+    // 2. 대피소 정보가 있으면 지도 표시
+    if (result.shelters && result.shelters.length > 0 && result.coordinates) {
+        displayShelterResults(result.location, result.coordinates, result.shelters);
     }
 
     setControlsDisabled(false);

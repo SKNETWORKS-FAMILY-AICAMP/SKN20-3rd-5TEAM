@@ -287,6 +287,7 @@ async def extract_location(request: LocationExtractRequest = Body(...)):
         
         result = langgraph_app.invoke(
             {"messages": [HumanMessage(content=query)]},
+           
             config=config
         )
         

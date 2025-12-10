@@ -242,7 +242,7 @@ def create_langgraph_app(vectorstore):
             # 모든 대피소 가져오기
             all_data = vectorstore.get(where={"type": "shelter"})
             shelters = []
-            
+
             for metadata in all_data['metadatas']:
                 try:
                     lat = float(metadata.get('lat', 0))
@@ -306,12 +306,16 @@ def create_langgraph_app(vectorstore):
             }
     
     @tool
-    def count_shelters(query: str) -> str:
+    def count_shelters(query: str) -> dict:
         """
         특정 조건(지역, 위치유형 등)에 맞는 대피소 개수를 셉니다.
+        지도 표시용 구조화된 데이터를 포함합니다.
         
         Args:
             query: 검색 조건 (예: "서울 지하", "부산 민방위")
+        
+        Returns:
+            dict: {"text": str, "structured_data": dict} 형식
         """
         try:
             # 쿼리 재정의
@@ -319,42 +323,81 @@ def create_langgraph_app(vectorstore):
             print(f"[count_shelters] 재정의: {query} → {rewritten}")
             
             if shelter_hybrid is None:
-                return "검색 시스템이 초기화되지 않았습니다."
+                return {
+                    "text": "검색 시스템이 초기화되지 않았습니다.",
+                    "structured_data": None
+                }
             
             # 하이브리드 검색
             results = shelter_hybrid.invoke(rewritten)
             
-            # 중복 제거
+            # 중복 제거 및 대피소 정보 수집
             seen = set()
-            count = 0
+            shelters = []
             for doc in results:
                 name = doc.metadata.get('facility_name', '')
                 if name and name not in seen:
                     seen.add(name)
-                    count += 1
+                    shelters.append({
+                        'name': name,
+                        'address': doc.metadata.get('address', 'N/A'),
+                        'lat': float(doc.metadata.get('lat', 0)),
+                        'lon': float(doc.metadata.get('lon', 0)),
+                        'distance': 0,
+                        'capacity': int(doc.metadata.get('capacity', 0)),
+                        'shelter_type': doc.metadata.get('shelter_type', 'N/A'),
+                        'facility_type': doc.metadata.get('facility_type', 'N/A')
+                    })
             
-            if count == 0:
-                return f"'{query}' 조건에 맞는 대피소를 찾을 수 없습니다."
+            if len(shelters) == 0:
+                return {
+                    "text": f"'{query}' 조건에 맞는 대피소를 찾을 수 없습니다.",
+                    "structured_data": None
+                }
             
-            return f"**'{query}'** 조건에 맞는 대피소는 총 **{count}개**입니다."
+            # 중심 좌표 계산 (평균)
+            avg_lat = sum(s['lat'] for s in shelters if s['lat'] != 0) / len([s for s in shelters if s['lat'] != 0]) if any(s['lat'] != 0 for s in shelters) else 0
+            avg_lon = sum(s['lon'] for s in shelters if s['lon'] != 0) / len([s for s in shelters if s['lon'] != 0]) if any(s['lon'] != 0 for s in shelters) else 0
+            
+            structured_data = {
+                "location": query,
+                "coordinates": (avg_lat, avg_lon) if avg_lat != 0 else None,
+                "shelters": shelters[:10],  # 최대 10개만
+                "total_count": len(shelters)
+            }
+            
+            return {
+                "text": f"**'{query}'** 조건에 맞는 대피소는 총 **{len(shelters)}개**입니다.",
+                "structured_data": structured_data
+            }
             
         except Exception as e:
             print(f"[ERROR] count_shelters: {e}")
-            return f"검색 중 오류 발생: {str(e)}"
+            return {
+                "text": f"검색 중 오류 발생: {str(e)}",
+                "structured_data": None
+            }
     
     @tool
-    def search_shelter_by_capacity(query: str) -> str:
+    def search_shelter_by_capacity(query: str) -> dict:
         """
         수용인원 기준으로 대피소를 검색합니다.
+        지도 표시용 구조화된 데이터를 포함합니다.
         
         Args:
             query: 수용인원 조건 (예: "천 명 이상", "100명 수용 가능")
+        
+        Returns:
+            dict: {"text": str, "structured_data": dict} 형식
         """
         try:
             # 숫자 추출
             numbers = re.findall(r'\d+', query)
             if not numbers:
-                return "수용인원을 명확히 입력해주세요. (예: 1000명 이상)"
+                return {
+                    "text": "수용인원을 명확히 입력해주세요. (예: 1000명 이상)",
+                    "structured_data": None
+                }
             
             min_capacity = int(numbers[0])
             
@@ -376,8 +419,11 @@ def create_langgraph_app(vectorstore):
                     shelters.append({
                         'name': metadata.get('facility_name', 'N/A'),
                         'address': metadata.get('address', 'N/A'),
+                        'lat': float(metadata.get('lat', 0)),
+                        'lon': float(metadata.get('lon', 0)),
                         'capacity': capacity,
-                        'shelter_type': metadata.get('shelter_type', 'N/A')
+                        'shelter_type': metadata.get('shelter_type', 'N/A'),
+                        'distance': 0  # 수용인원 검색은 거리 정보 없음
                     })
             
             # 수용인원 내림차순 정렬
@@ -385,7 +431,10 @@ def create_langgraph_app(vectorstore):
             top_10 = shelters[:10]
             
             if not top_10:
-                return f"{min_capacity:,}명 이상 수용 가능한 대피소를 찾을 수 없습니다."
+                return {
+                    "text": f"{min_capacity:,}명 이상 수용 가능한 대피소를 찾을 수 없습니다.",
+                    "structured_data": None
+                }
             
             result = f"📊 **{min_capacity:,}명 이상** 수용 가능한 대피소 **{len(shelters)}곳** 중 상위 10곳\n\n"
             for i, s in enumerate(top_10, 1):
@@ -393,19 +442,39 @@ def create_langgraph_app(vectorstore):
                 result += f"   📍 {s['address']}\n"
                 result += f"   📍 위치: {s['shelter_type']}\n\n"
             
-            return result.strip()
+            # 중심 좌표 계산 (평균)
+            avg_lat = sum(s['lat'] for s in shelters if s['lat'] != 0) / len([s for s in shelters if s['lat'] != 0]) if any(s['lat'] != 0 for s in shelters) else 0
+            avg_lon = sum(s['lon'] for s in shelters if s['lon'] != 0) / len([s for s in shelters if s['lon'] != 0]) if any(s['lon'] != 0 for s in shelters) else 0
+            
+            structured_data = {
+                "location": f"{min_capacity:,}명 이상 수용 가능",
+                "coordinates": (avg_lat, avg_lon) if avg_lat != 0 else None,
+                "shelters": top_10,
+                "total_count": len(shelters)
+            }
+            
+            return {
+                "text": result.strip(),
+                "structured_data": structured_data
+            }
             
         except Exception as e:
             print(f"[ERROR] search_shelter_by_capacity: {e}")
-            return f"검색 중 오류 발생: {str(e)}"
+            return {
+                "text": f"검색 중 오류 발생: {str(e)}",
+                "structured_data": None
+            }
     
     @tool
-    def search_disaster_guideline(query: str) -> str:
+    def search_disaster_guideline(query: str) -> dict:
         """
         재난 행동요령을 검색합니다.
         
         Args:
             query: 재난 유형 (예: "지진", "화재", "산사태")
+        
+        Returns:
+            dict: {"text": str, "structured_data": None} 형식
         """
         try:
             # 쿼리 재정의
@@ -413,31 +482,46 @@ def create_langgraph_app(vectorstore):
             print(f"[search_disaster_guideline] 재정의: {query} → {rewritten}")
             
             if guideline_hybrid is None:
-                return "가이드라인 검색 시스템이 초기화되지 않았습니다."
+                return {
+                    "text": "가이드라인 검색 시스템이 초기화되지 않았습니다.",
+                    "structured_data": None
+                }
             
             # 하이브리드 검색
             results = guideline_hybrid.invoke(rewritten)
             
             if not results:
-                return f"'{query}' 관련 행동요령을 찾을 수 없습니다."
+                return {
+                    "text": f"'{query}' 관련 행동요령을 찾을 수 없습니다.",
+                    "structured_data": None
+                }
             
             # 상위 3개 결과 통합
             combined = "\n\n".join([doc.page_content for doc in results[:3]])
             
-            return f"🚨 **{query} 행동요령**\n\n{combined}"
+            return {
+                "text": f"🚨 **{query} 행동요령**\n\n{combined}",
+                "structured_data": None  # 행동요령은 위치 정보 없음
+            }
             
         except Exception as e:
             print(f"[ERROR] search_disaster_guideline: {e}")
-            return f"검색 중 오류 발생: {str(e)}"
+            return {
+                "text": f"검색 중 오류 발생: {str(e)}",
+                "structured_data": None
+            }
     
     @tool
-    def answer_general_knowledge(query: str) -> str:
+    def answer_general_knowledge(query: str) -> dict:
         """
         재난 관련 일반 지식 질문에 답변합니다. (정의, 원인, 특징 등)
         VectorDB에 없는 정보는 LLM의 사전 학습 지식을 활용합니다.
         
         Args:
             query: 일반 지식 질문 (예: "지진이 뭐야", "쓰나미란")
+        
+        Returns:
+            dict: {"text": str, "structured_data": None} 형식
         """
         try:
             print(f"[answer_general_knowledge] 질문: {query}")
@@ -456,19 +540,29 @@ def create_langgraph_app(vectorstore):
             
             response = llm_creative.invoke([HumanMessage(content=prompt)])
             
-            return f"💡 **{query}**\n\n{response.content}"
+            return {
+                "text": f"💡 **{query}**\n\n{response.content}",
+                "structured_data": None  # 일반 지식은 위치 정보 없음
+            }
             
         except Exception as e:
             print(f"[ERROR] answer_general_knowledge: {e}")
-            return "죄송합니다. 답변 생성 중 오류가 발생했습니다."
+            return {
+                "text": "죄송합니다. 답변 생성 중 오류가 발생했습니다.",
+                "structured_data": None
+            }
     @tool
-    def search_shelter_by_name(query: str) -> str:
+    def search_shelter_by_name(query: str) -> dict:
         """
         특정 대피소의 상세 정보를 시설명으로 검색합니다.
         수용인원, 주소, 위치 등 해당 시설의 모든 정보를 반환합니다.
+        지도 표시용 구조화된 데이터를 포함합니다.
         
         Args:
             query: 대피소 시설명 (예: "동대문맨션", "서울역", "롯데월드")
+        
+        Returns:
+            dict: {"text": str, "structured_data": dict} 형식
         
         Examples:
             - "동대문맨션 수용인원" → search_shelter_by_name("동대문맨션")
@@ -498,50 +592,97 @@ def create_langgraph_app(vectorstore):
                 
                 # 양방향 부분 일치
                 if search_term in facility_lower or facility_lower in search_term:
-                    matches.append(metadata)
+                    matches.append({
+                        'name': facility_name,
+                        'address': metadata.get('address', 'N/A'),
+                        'lat': float(metadata.get('lat', 0)),
+                        'lon': float(metadata.get('lon', 0)),
+                        'capacity': int(metadata.get('capacity', 0)),
+                        'shelter_type': metadata.get('shelter_type', 'N/A'),
+                        'facility_type': metadata.get('facility_type', 'N/A'),
+                        'operating_status': metadata.get('operating_status', 'N/A'),
+                        'distance': 0  # 시설명 검색은 거리 정보 없음
+                    })
                     print(f"[search_shelter_by_name] 매칭됨: {facility_name}")
             
             if not matches:
-                return f"❌ '{query}' 시설을 찾을 수 없습니다.\n시설명을 정확히 입력해주세요."
+                return {
+                    "text": f"❌ '{query}' 시설을 찾을 수 없습니다.\n시설명을 정확히 입력해주세요.",
+                    "structured_data": None
+                }
             
             # 결과 반환
             if len(matches) == 1:
                 m = matches[0]
-                return f"""📍 **{m.get('facility_name')}**
+                text = f"""📍 **{m['name']}**
 
-    ✅ **최대 수용인원: {int(m.get('capacity', 0)):,}명**
-    📍 주소: {m.get('address', 'N/A')}
-    📍 위치: {m.get('shelter_type', 'N/A')}
-    📍 시설 유형: {m.get('facility_type', 'N/A')}
-    📍 운영 상태: {m.get('operating_status', 'N/A')}"""
+    ✅ **최대 수용인원: {m['capacity']:,}명**
+    📍 주소: {m['address']}
+    📍 위치: {m['shelter_type']}
+    📍 시설 유형: {m['facility_type']}
+    📍 운영 상태: {m['operating_status']}"""
+                
+                # 구조화된 데이터 (지도 표시용)
+                structured_data = {
+                    "location": m['name'],
+                    "coordinates": (m['lat'], m['lon']) if m['lat'] != 0 else None,
+                    "shelters": [m],
+                    "total_count": 1
+                }
+                
+                return {
+                    "text": text,
+                    "structured_data": structured_data
+                }
             
             else:
                 # 여러 개 발견 시
-                result = f"📍 **'{search_term}'** 관련 대피소 **{len(matches)}곳** 발견\n\n"
+                text = f"📍 **'{search_term}'** 관련 대피소 **{len(matches)}곳** 발견\n\n"
                 for i, m in enumerate(matches[:5], 1):  # 상위 5개만
-                    result += f"{i}. **{m.get('facility_name')}**\n"
-                    result += f"   ✅ 수용인원: **{int(m.get('capacity', 0)):,}명**\n"
-                    result += f"   📍 주소: {m.get('address', 'N/A')}\n"
-                    result += f"   📍 위치: {m.get('shelter_type', 'N/A')}\n\n"
+                    text += f"{i}. **{m['name']}**\n"
+                    text += f"   ✅ 수용인원: **{m['capacity']:,}명**\n"
+                    text += f"   📍 주소: {m['address']}\n"
+                    text += f"   📍 위치: {m['shelter_type']}\n\n"
                 
                 if len(matches) > 5:
-                    result += f"💡 외 {len(matches) - 5}곳 더 있습니다."
+                    text += f"💡 외 {len(matches) - 5}곳 더 있습니다."
                 
-                return result.strip()
+                # 중심 좌표 계산 (평균)
+                avg_lat = sum(s['lat'] for s in matches if s['lat'] != 0) / len([s for s in matches if s['lat'] != 0]) if any(s['lat'] != 0 for s in matches) else 0
+                avg_lon = sum(s['lon'] for s in matches if s['lon'] != 0) / len([s for s in matches if s['lon'] != 0]) if any(s['lon'] != 0 for s in matches) else 0
+                
+                structured_data = {
+                    "location": search_term,
+                    "coordinates": (avg_lat, avg_lon) if avg_lat != 0 else None,
+                    "shelters": matches[:5],
+                    "total_count": len(matches)
+                }
+                
+                return {
+                    "text": text.strip(),
+                    "structured_data": structured_data
+                }
             
         except Exception as e:
             print(f"[ERROR] search_shelter_by_name: {e}")
             import traceback
             traceback.print_exc()
-            return f"❌ 검색 중 오류 발생: {str(e)}"
+            return {
+                "text": f"❌ 검색 중 오류 발생: {str(e)}",
+                "structured_data": None
+            }
     @tool
-    def search_location_with_disaster(query: str) -> str:
+    def search_location_with_disaster(query: str) -> dict:
         """
         특정 위치에서 재난 발생 시 대피소와 행동요령을 함께 제공합니다.
         위치 기반 대피소 검색 + 재난 행동요령을 통합하여 반환합니다.
+        지도 표시용 구조화된 데이터를 포함합니다.
         
         Args:
             query: 위치 + 재난 상황 (예: "설악산 근처 산사태", "강남역에서 지진")
+        
+        Returns:
+            dict: {"text": str, "structured_data": dict} 형식
         
         Examples:
             - "설악산 근처인데 산사태 발생 시" → 설악산 대피소 + 산사태 행동요령
@@ -575,12 +716,18 @@ def create_langgraph_app(vectorstore):
             print(f"[search_location_with_disaster] 감지된 재난: '{detected_disaster}'")
             
             if not detected_disaster:
-                return "재난 유형을 파악할 수 없습니다. 예: '설악산 산사태', '강남역 지진'"
+                return {
+                    "text": "재난 유형을 파악할 수 없습니다. 예: '설악산 산사태', '강남역 지진'",
+                    "structured_data": None
+                }
             
             # 2단계: 카카오 API로 위치 좌표 검색
             kakao_api_key = os.getenv("KAKAO_REST_API_KEY")
             if not kakao_api_key:
-                return "카카오 API 키가 설정되지 않았습니다."
+                return {
+                    "text": "카카오 API 키가 설정되지 않았습니다.",
+                    "structured_data": None
+                }
             
             headers = {"Authorization": f"KakaoAK {kakao_api_key}"}
             url = "https://dapi.kakao.com/v2/local/search/keyword.json"
@@ -590,7 +737,10 @@ def create_langgraph_app(vectorstore):
             data = response.json()
             
             if not data.get("documents"):
-                return f"'{location_query}' 위치를 찾을 수 없습니다."
+                return {
+                    "text": f"'{location_query}' 위치를 찾을 수 없습니다.",
+                    "structured_data": None
+                }
             
             # 좌표 추출
             place = data["documents"][0]
@@ -624,6 +774,8 @@ def create_langgraph_app(vectorstore):
                     shelters.append({
                         'name': metadata.get('facility_name', 'N/A'),
                         'address': metadata.get('address', 'N/A'),
+                        'lat': lat,
+                        'lon': lon,
                         'distance': distance,
                         'capacity': int(metadata.get('capacity', 0)),
                         'shelter_type': metadata.get('shelter_type', 'N/A')
@@ -676,13 +828,27 @@ def create_langgraph_app(vectorstore):
     ✅ 119 신고 (필요 시)
     """
             
-            return result.strip()
+            # 구조화된 데이터 (지도 표시용)
+            structured_data = {
+                "location": place_name,
+                "coordinates": (user_lat, user_lon),
+                "shelters": top_3,
+                "total_count": len(all_data['metadatas'])
+            }
+            
+            return {
+                "text": result.strip(),
+                "structured_data": structured_data
+            }
             
         except Exception as e:
             print(f"[ERROR] search_location_with_disaster: {e}")
             import traceback
             traceback.print_exc()
-            return f"복합 검색 중 오류 발생: {str(e)}"
+            return {
+                "text": f"복합 검색 중 오류 발생: {str(e)}",
+                "structured_data": None
+            }
     # 6. Tools 리스트
     tools = [
         search_shelter_by_location,
@@ -824,12 +990,24 @@ def create_langgraph_app(vectorstore):
         for message in messages:
             if hasattr(message, "content"):
                 content = message.content
-                # dict 타입이고 structured_data 키가 있는지 확인
-                if isinstance(content, dict) and "structured_data" in content:
+                
+                # content가 문자열인 경우 JSON 파싱 시도
+                if isinstance(content, str):
+                    try:
+                        import json
+                        parsed = json.loads(content)
+                        if isinstance(parsed, dict) and "structured_data" in parsed:
+                            structured_data = parsed["structured_data"]
+                            message.content = parsed.get("text", content)
+                            print(f"[tools_node] structured_data 추출 완료 (JSON): {structured_data is not None}")
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                
+                # content가 dict인 경우 직접 처리
+                elif isinstance(content, dict) and "structured_data" in content:
                     structured_data = content["structured_data"]
-                    # 텍스트 부분만 메시지 content로 변경
                     message.content = content.get("text", str(content))
-                    print(f"[tools_node] structured_data 추출 완료: {structured_data is not None}")
+                    print(f"[tools_node] structured_data 추출 완료 (dict): {structured_data is not None}")
         
         return {
             "messages": messages,
