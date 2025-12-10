@@ -20,6 +20,7 @@
 | 프론트엔드 | <img src="https://img.shields.io/badge/HTML5-E34F26.svg?style=flat&logo=html5&logoColor=white" /> <span style="display:inline-block; width:180px;">HTML</span> |
 | 프론트엔드 | <img src="https://img.shields.io/badge/JavaScript-F7DF1E.svg?style=flat&logo=javascript&logoColor=black" /> <span style="display:inline-block; width:180px;">JavaScript</span> |
 | 프레임워크 | <img src="https://img.shields.io/badge/LangChain-1E8C7E.svg?style=flat&logo=chainlink&logoColor=white" /> <span style="display:inline-block; width:180px;">LangChain</span> |
+| 프레임워크 | <img src="https://img.shields.io/badge/LangGraph-1E8C7E.svg?style=flat&logo=chainlink&logoColor=white" /> <span style="display:inline-block; width:180px;">LangGraph</span> |
 | 프레임워크 | <img src="https://img.shields.io/badge/FastAPI-009688.svg?style=flat&logo=fastapi&logoColor=white" /> <span style="display:inline-block; width:180px;">FastAPI</span> |
 | 웹 UI | <img src="https://img.shields.io/badge/Streamlit-FF4B4B.svg?style=flat&logo=streamlit&logoColor=white" /> <span style="display:inline-block; width:180px;">Streamlit</span> |
 | 임베딩 모델 | <img src="https://img.shields.io/badge/OpenAI%20Embedding-000000.svg?style=flat&logo=openai&logoColor=white" /> <span style="display:inline-block; width:180px;">OpenAI</span> |
