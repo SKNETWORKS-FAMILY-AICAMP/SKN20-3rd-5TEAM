@@ -51,7 +51,7 @@ flowchart TD
     E --> F[OpenAI 임베딩 생성]
     F --> G[Chroma VectorDB 저장]
     G --> H[RAG 검색 및 추론]
-    H --> I[Streamlit 챗봇 응답]
+    H --> I[html 챗봇 응답]
 ```
 
 ---
@@ -93,7 +93,9 @@ SKN20-3RD-5TEAM/
 ├── documents.py
 ├── embedding_and_vectordb.py
 ├── from_DataLoad_to_VectorDB.py
-└── chatbot_streamlit.py
+└── Frontend
+  ├── main.py
+  └── shelter_1.0.html
 ```
 
 ---
@@ -109,9 +111,8 @@ OPENAI_API_KEY=본인키
 ### 3️⃣ 전체 RAG 파이프라인 실행 (VectorDB 생성)
 python from_DataLoad_to_VectorDB.py
 
-### 4️⃣ Streamlit 챗봇 실행
-streamlit run chatbot_streamlit.py
-
+### 4️⃣ 챗봇 실행
+main.py, shelter_1.0.html
 ---
 
 ## 🔗 html 챗봇
