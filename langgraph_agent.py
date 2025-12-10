@@ -425,6 +425,79 @@ def create_langgraph_app(vectorstore):
         except Exception as e:
             print(f"[ERROR] answer_general_knowledge: {e}")
             return "죄송합니다. 답변 생성 중 오류가 발생했습니다."
+    @tool
+    def search_shelter_by_name(query: str) -> str:
+        """
+        특정 대피소의 상세 정보를 시설명으로 검색합니다.
+        수용인원, 주소, 위치 등 해당 시설의 모든 정보를 반환합니다.
+        
+        Args:
+            query: 대피소 시설명 (예: "동대문맨션", "서울역", "롯데월드")
+        
+        Examples:
+            - "동대문맨션 수용인원" → search_shelter_by_name("동대문맨션")
+            - "서울역 대피소 정보" → search_shelter_by_name("서울역")
+        """
+        try:
+            print(f"[search_shelter_by_name] 검색 시작: '{query}'")
+            
+            # VectorStore에서 shelter 타입 문서 가져오기
+            all_data = vectorstore.get(where={"type": "shelter"})
+            
+            # 검색어 정제 (불필요한 단어 제거)
+            search_term = query.strip().lower()
+            remove_words = ["대피소", "수용인원", "최대수용인원", "몇명", "정보", 
+                        "알려줘", "의", "이", "가", "은", "는", "?", "!", " "]
+            for word in remove_words:
+                search_term = search_term.replace(word, "")
+            search_term = search_term.strip()
+            
+            print(f"[search_shelter_by_name] 정제된 검색어: '{search_term}'")
+            
+            # 시설명 매칭 (부분 일치)
+            matches = []
+            for metadata in all_data['metadatas']:
+                facility_name = metadata.get('facility_name', '')
+                facility_lower = facility_name.lower()
+                
+                # 양방향 부분 일치
+                if search_term in facility_lower or facility_lower in search_term:
+                    matches.append(metadata)
+                    print(f"[search_shelter_by_name] 매칭됨: {facility_name}")
+            
+            if not matches:
+                return f"❌ '{query}' 시설을 찾을 수 없습니다.\n시설명을 정확히 입력해주세요."
+            
+            # 결과 반환
+            if len(matches) == 1:
+                m = matches[0]
+                return f"""📍 **{m.get('facility_name')}**
+
+    ✅ **최대 수용인원: {int(m.get('capacity', 0)):,}명**
+    📍 주소: {m.get('address', 'N/A')}
+    📍 위치: {m.get('shelter_type', 'N/A')}
+    📍 시설 유형: {m.get('facility_type', 'N/A')}
+    📍 운영 상태: {m.get('operating_status', 'N/A')}"""
+            
+            else:
+                # 여러 개 발견 시
+                result = f"📍 **'{search_term}'** 관련 대피소 **{len(matches)}곳** 발견\n\n"
+                for i, m in enumerate(matches[:5], 1):  # 상위 5개만
+                    result += f"{i}. **{m.get('facility_name')}**\n"
+                    result += f"   ✅ 수용인원: **{int(m.get('capacity', 0)):,}명**\n"
+                    result += f"   📍 주소: {m.get('address', 'N/A')}\n"
+                    result += f"   📍 위치: {m.get('shelter_type', 'N/A')}\n\n"
+                
+                if len(matches) > 5:
+                    result += f"💡 외 {len(matches) - 5}곳 더 있습니다."
+                
+                return result.strip()
+            
+        except Exception as e:
+            print(f"[ERROR] search_shelter_by_name: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"❌ 검색 중 오류 발생: {str(e)}"
     
     # 6. Tools 리스트
     tools = [
@@ -432,7 +505,8 @@ def create_langgraph_app(vectorstore):
         count_shelters,
         search_shelter_by_capacity,
         search_disaster_guideline,
-        answer_general_knowledge
+        answer_general_knowledge,
+        search_shelter_by_name
     ]
     
     # 7. LLM에 Tools 바인딩
