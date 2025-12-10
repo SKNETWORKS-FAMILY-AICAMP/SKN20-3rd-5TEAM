@@ -1,0 +1,645 @@
+# -*- coding: utf-8 -*-
+"""
+LangGraph Agent 및 Tools 정의
+대피소 검색, 재난 행동요령, 통계 기능을 담당하는 AI Agent
+"""
+
+import os
+import requests
+import json
+import re
+from math import radians, sin, cos, sqrt, atan2
+from typing import TypedDict, Annotated, Optional
+
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.tools import tool
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.documents import Document
+from langchain_community.retrievers import BM25Retriever
+from langgraph.graph import StateGraph, END, START
+from langgraph.prebuilt import ToolNode
+from langgraph.graph.message import add_messages
+from langgraph.checkpoint.memory import MemorySaver
+
+
+class EnsembleRetriever:
+    """간단한 앙상블 리트리버 구현"""
+    def __init__(self, retrievers, weights=None):
+        self.retrievers = retrievers
+        self.weights = weights or [1.0 / len(retrievers)] * len(retrievers)
+    
+    def invoke(self, query):
+        all_docs = []
+        for retriever, weight in zip(self.retrievers, self.weights):
+            try:
+                docs = retriever.invoke(query)
+                for doc in docs:
+                    doc.metadata['retriever_weight'] = weight
+                    all_docs.append(doc)
+            except:
+                continue
+        # 중복 제거 및 가중치 기반 정렬
+        seen = set()
+        unique_docs = []
+        for doc in all_docs:
+            doc_id = doc.page_content[:100]
+            if doc_id not in seen:
+                seen.add(doc_id)
+                unique_docs.append(doc)
+        return unique_docs[:10]
+
+
+def create_hybrid_retrievers(vectorstore):
+    """하이브리드 리트리버 생성 (Vector + BM25)"""
+    if vectorstore is None:
+        return None, None
+    
+    try:
+        # 1. Vector Retriever
+        shelter_vector_retriever = vectorstore.as_retriever(
+            search_kwargs={"k": 5, "filter": {"type": "shelter"}}
+        )
+        guideline_vector_retriever = vectorstore.as_retriever(
+            search_kwargs={"k": 3, "filter": {"type": "disaster_guideline"}}
+        )
+        
+        # 2. BM25 Retriever 생성
+        def create_bm25_retriever(doc_type: str):
+            try:
+                all_docs = vectorstore.get(where={"type": doc_type})
+                if not all_docs or 'documents' not in all_docs:
+                    return None
+                
+                documents = []
+                for i, text in enumerate(all_docs['documents']):
+                    metadata = all_docs['metadatas'][i] if 'metadatas' in all_docs else {}
+                    documents.append(Document(page_content=text, metadata=metadata))
+                
+                bm25_retriever = BM25Retriever.from_documents(documents)
+                bm25_retriever.k = 5
+                return bm25_retriever
+            except Exception as e:
+                print(f"⚠️ BM25 Retriever 생성 실패 ({doc_type}): {e}")
+                return None
+        
+        shelter_bm25 = create_bm25_retriever("shelter")
+        guideline_bm25 = create_bm25_retriever("disaster_guideline")
+        
+        # 3. Ensemble (Hybrid) Retriever
+        shelter_hybrid = EnsembleRetriever(
+            retrievers=[shelter_vector_retriever, shelter_bm25] if shelter_bm25 else [shelter_vector_retriever],
+            weights=[0.6, 0.4] if shelter_bm25 else [1.0]
+        )
+        
+        guideline_hybrid = EnsembleRetriever(
+            retrievers=[guideline_vector_retriever, guideline_bm25] if guideline_bm25 else [guideline_vector_retriever],
+            weights=[0.7, 0.3] if guideline_bm25 else [1.0]
+        )
+        
+        return shelter_hybrid, guideline_hybrid
+        
+    except Exception as e:
+        print(f"⚠️ 하이브리드 리트리버 생성 실패: {e}")
+        return None, None
+
+
+def create_langgraph_app(vectorstore):
+    """LangGraph Agent 생성"""
+    
+    # 1. LLM 초기화
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm_creative = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)  # 일반 지식용
+    
+    # 2. 의도 분류 체인
+    intent_classification_prompt = ChatPromptTemplate.from_messages([
+        ("system", """당신은 사용자 질문의 의도를 정확하게 분류하는 AI입니다.
+
+질문을 다음 카테고리 중 하나로 분류하세요:
+
+1. **shelter_search**: 특정 위치의 대피소 찾기
+   - 예: "한라산 근처 대피소", "강남역 대피소", "동대문맨션 대피소 정보"
+   
+2. **shelter_count**: 특정 조건의 대피소 개수 세기
+   - 예: "서울 대피소 개수", "지하 대피소 몇 개", "부산 민방위 대피소는 총 몇 개"
+   
+3. **shelter_capacity**: 수용인원 기준 대피소 찾기
+   - 예: "천 명 이상 수용 가능한 대피소", "100명 수용 가능한 근처 대피소"
+   
+4. **disaster_guideline**: 재난 행동요령 질문
+   - 예: "지진 발생 시 행동요령", "화재 대처법", "산사태 났을 때"
+   
+5. **hybrid_location_disaster**: 위치 + 재난 상황 복합 질문
+   - 예: "설악산 근처인데 산사태 발생 시", "강남역에서 지진 나면"
+   
+6. **general_knowledge**: 재난 관련 일반 지식 (정의, 원인 등)
+   - 예: "지진이 뭐야", "쓰나미란", "태풍의 원인"
+   
+7. **general_chat**: 일반 대화
+   - 예: "안녕", "고마워", "날씨 어때"
+
+**응답 형식**: JSON
+{{
+    "intent": "카테고리명",
+    "confidence": 0.95,
+    "reason": "분류 근거"
+}}"""),
+        ("user", "{query}")
+    ])
+    
+    intent_chain = intent_classification_prompt | llm | StrOutputParser()
+    
+    # 3. 질문 재정의 체인 (검색 정확도 향상)
+    query_rewrite_prompt = ChatPromptTemplate.from_messages([
+        ("system", """당신은 검색 쿼리를 최적화하는 전문가입니다.
+
+사용자의 질문을 BM25 키워드 검색에 최적화된 형태로 재작성하세요.
+
+**재작성 규칙**:
+1. 핵심 키워드만 추출 (불필요한 조사, 어미 제거)
+2. 동의어 추가 (예: "대피소" → "대피소 피난처")
+3. 지역명은 다양한 형태로 표현 (예: "서울" → "서울 서울시 서울특별시")
+4. 위치 유형 명확화 (예: "지하" → "지하 지하층")
+5. 최대 10단어 이내로 간결하게
+
+**예시**:
+- "한라산 근처 대피소는?" → "한라산 제주 대피소 피난처"
+- "서울에 있는 지하 대피소" → "서울 서울시 지하 지하층 대피소"
+- "동대문맨션 대피소" → "동대문맨션 동대문 대피소"
+
+**응답**: 재작성된 쿼리만 출력 (설명 없이)"""),
+        ("user", "{original_query}")
+    ])
+    
+    query_rewrite_chain = query_rewrite_prompt | llm | StrOutputParser()
+    
+    # 4. 하이브리드 리트리버 생성
+    shelter_hybrid, guideline_hybrid = create_hybrid_retrievers(vectorstore)
+    
+    # 5. Tools 정의
+    @tool
+    def search_shelter_by_location(query: str) -> str:
+        """
+        특정 위치의 대피소를 검색합니다.
+        카카오 API로 좌표를 찾고, 가장 가까운 대피소 5곳을 반환합니다.
+        
+        Args:
+            query: 위치 정보 (지명, 건물명, 주소 등)
+        """
+        try:
+            # 쿼리 재정의
+            rewritten = query_rewrite_chain.invoke({"original_query": query})
+            print(f"[search_shelter_by_location] 재정의: {query} → {rewritten}")
+            
+            # 카카오 API로 좌표 검색
+            kakao_api_key = os.getenv("KAKAO_REST_API_KEY")
+            if not kakao_api_key:
+                return "카카오 API 키가 설정되지 않았습니다."
+            
+            headers = {"Authorization": f"KakaoAK {kakao_api_key}"}
+            url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+            params = {"query": rewritten}
+            
+            response = requests.get(url, headers=headers, params=params)
+            data = response.json()
+            
+            if not data.get("documents"):
+                return f"'{query}' 위치를 찾을 수 없습니다."
+            
+            # 첫 번째 결과의 좌표
+            place = data["documents"][0]
+            user_lat = float(place["y"])
+            user_lon = float(place["x"])
+            place_name = place["place_name"]
+            
+            print(f"[search_shelter_by_location] 좌표: {place_name} ({user_lat}, {user_lon})")
+            
+            # Haversine 거리 계산
+            def haversine(lat1, lon1, lat2, lon2):
+                R = 6371
+                dlat = radians(lat2 - lat1)
+                dlon = radians(lon2 - lon1)
+                a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+                c = 2 * atan2(sqrt(a), sqrt(1-a))
+                return R * c
+            
+            # 모든 대피소 가져오기
+            all_data = vectorstore.get(where={"type": "shelter"})
+            shelters = []
+            
+            for i, metadata in enumerate(all_data['metadatas']):
+                try:
+                    lat = float(metadata.get('latitude', 0))
+                    lon = float(metadata.get('longitude', 0))
+                    if lat == 0 or lon == 0:
+                        continue
+                    
+                    distance = haversine(user_lat, user_lon, lat, lon)
+                    shelters.append({
+                        'name': metadata.get('facility_name', 'N/A'),
+                        'address': metadata.get('address', 'N/A'),
+                        'distance': distance,
+                        'capacity': int(metadata.get('capacity', 0)),
+                        'shelter_type': metadata.get('shelter_type', 'N/A'),
+                        'facility_type': metadata.get('facility_type', 'N/A')
+                    })
+                except Exception as e:
+                    continue
+            
+            # 거리순 정렬
+            shelters.sort(key=lambda x: x['distance'])
+            top_5 = shelters[:5]
+            
+            if not top_5:
+                return f"'{place_name}' 근처에 대피소를 찾을 수 없습니다."
+            
+            # 결과 포맷팅
+            result = f"📍 **{place_name}** 근처 대피소 {len(top_5)}곳\n\n"
+            for i, s in enumerate(top_5, 1):
+                result += f"{i}. **{s['name']}**\n"
+                result += f"   📍 거리: {s['distance']:.2f}km\n"
+                result += f"   📍 주소: {s['address']}\n"
+                result += f"   📍 위치: {s['shelter_type']}\n"
+                result += f"   📍 수용인원: {s['capacity']:,}명\n\n"
+            
+            return result.strip()
+            
+        except Exception as e:
+            print(f"[ERROR] search_shelter_by_location: {e}")
+            return f"검색 중 오류 발생: {str(e)}"
+    
+    @tool
+    def count_shelters(query: str) -> str:
+        """
+        특정 조건(지역, 위치유형 등)에 맞는 대피소 개수를 셉니다.
+        
+        Args:
+            query: 검색 조건 (예: "서울 지하", "부산 민방위")
+        """
+        try:
+            # 쿼리 재정의
+            rewritten = query_rewrite_chain.invoke({"original_query": query})
+            print(f"[count_shelters] 재정의: {query} → {rewritten}")
+            
+            if shelter_hybrid is None:
+                return "검색 시스템이 초기화되지 않았습니다."
+            
+            # 하이브리드 검색
+            results = shelter_hybrid.invoke(rewritten)
+            
+            # 중복 제거
+            seen = set()
+            count = 0
+            for doc in results:
+                name = doc.metadata.get('facility_name', '')
+                if name and name not in seen:
+                    seen.add(name)
+                    count += 1
+            
+            if count == 0:
+                return f"'{query}' 조건에 맞는 대피소를 찾을 수 없습니다."
+            
+            return f"**'{query}'** 조건에 맞는 대피소는 총 **{count}개**입니다."
+            
+        except Exception as e:
+            print(f"[ERROR] count_shelters: {e}")
+            return f"검색 중 오류 발생: {str(e)}"
+    
+    @tool
+    def search_shelter_by_capacity(query: str) -> str:
+        """
+        수용인원 기준으로 대피소를 검색합니다.
+        
+        Args:
+            query: 수용인원 조건 (예: "천 명 이상", "100명 수용 가능")
+        """
+        try:
+            # 숫자 추출
+            numbers = re.findall(r'\d+', query)
+            if not numbers:
+                return "수용인원을 명확히 입력해주세요. (예: 1000명 이상)"
+            
+            min_capacity = int(numbers[0])
+            
+            # 숫자 단위 처리 (천, 만)
+            if '천' in query:
+                min_capacity *= 1000
+            elif '만' in query:
+                min_capacity *= 10000
+            
+            print(f"[search_shelter_by_capacity] 최소 수용인원: {min_capacity}명")
+            
+            # 모든 대피소 가져오기
+            all_data = vectorstore.get(where={"type": "shelter"})
+            shelters = []
+            
+            for metadata in all_data['metadatas']:
+                capacity = int(metadata.get('capacity', 0))
+                if capacity >= min_capacity:
+                    shelters.append({
+                        'name': metadata.get('facility_name', 'N/A'),
+                        'address': metadata.get('address', 'N/A'),
+                        'capacity': capacity,
+                        'shelter_type': metadata.get('shelter_type', 'N/A')
+                    })
+            
+            # 수용인원 내림차순 정렬
+            shelters.sort(key=lambda x: x['capacity'], reverse=True)
+            top_10 = shelters[:10]
+            
+            if not top_10:
+                return f"{min_capacity:,}명 이상 수용 가능한 대피소를 찾을 수 없습니다."
+            
+            result = f"📊 **{min_capacity:,}명 이상** 수용 가능한 대피소 **{len(shelters)}곳** 중 상위 10곳\n\n"
+            for i, s in enumerate(top_10, 1):
+                result += f"{i}. **{s['name']}** ({s['capacity']:,}명)\n"
+                result += f"   📍 {s['address']}\n"
+                result += f"   📍 위치: {s['shelter_type']}\n\n"
+            
+            return result.strip()
+            
+        except Exception as e:
+            print(f"[ERROR] search_shelter_by_capacity: {e}")
+            return f"검색 중 오류 발생: {str(e)}"
+    
+    @tool
+    def search_disaster_guideline(query: str) -> str:
+        """
+        재난 행동요령을 검색합니다.
+        
+        Args:
+            query: 재난 유형 (예: "지진", "화재", "산사태")
+        """
+        try:
+            # 쿼리 재정의
+            rewritten = query_rewrite_chain.invoke({"original_query": query})
+            print(f"[search_disaster_guideline] 재정의: {query} → {rewritten}")
+            
+            if guideline_hybrid is None:
+                return "가이드라인 검색 시스템이 초기화되지 않았습니다."
+            
+            # 하이브리드 검색
+            results = guideline_hybrid.invoke(rewritten)
+            
+            if not results:
+                return f"'{query}' 관련 행동요령을 찾을 수 없습니다."
+            
+            # 상위 3개 결과 통합
+            combined = "\n\n".join([doc.page_content for doc in results[:3]])
+            
+            return f"🚨 **{query} 행동요령**\n\n{combined}"
+            
+        except Exception as e:
+            print(f"[ERROR] search_disaster_guideline: {e}")
+            return f"검색 중 오류 발생: {str(e)}"
+    
+    @tool
+    def answer_general_knowledge(query: str) -> str:
+        """
+        재난 관련 일반 지식 질문에 답변합니다. (정의, 원인, 특징 등)
+        VectorDB에 없는 정보는 LLM의 사전 학습 지식을 활용합니다.
+        
+        Args:
+            query: 일반 지식 질문 (예: "지진이 뭐야", "쓰나미란")
+        """
+        try:
+            print(f"[answer_general_knowledge] 질문: {query}")
+            
+            # LLM에게 직접 질문 (사전 학습 지식 활용)
+            prompt = f"""당신은 재난 안전 전문가입니다.
+다음 질문에 정확하고 간결하게 답변하세요.
+
+질문: {query}
+
+답변 형식:
+- 핵심 정의를 2-3문장으로 설명
+- 주요 특징이나 원인을 불릿 포인트로 정리
+- 전문 용어는 쉽게 풀어서 설명
+- 최대 200자 이내로 간결하게"""
+            
+            response = llm_creative.invoke([HumanMessage(content=prompt)])
+            
+            return f"💡 **{query}**\n\n{response.content}"
+            
+        except Exception as e:
+            print(f"[ERROR] answer_general_knowledge: {e}")
+            return "죄송합니다. 답변 생성 중 오류가 발생했습니다."
+    @tool
+    def search_shelter_by_name(query: str) -> str:
+        """
+        특정 대피소의 상세 정보를 시설명으로 검색합니다.
+        수용인원, 주소, 위치 등 해당 시설의 모든 정보를 반환합니다.
+        
+        Args:
+            query: 대피소 시설명 (예: "동대문맨션", "서울역", "롯데월드")
+        
+        Examples:
+            - "동대문맨션 수용인원" → search_shelter_by_name("동대문맨션")
+            - "서울역 대피소 정보" → search_shelter_by_name("서울역")
+        """
+        try:
+            print(f"[search_shelter_by_name] 검색 시작: '{query}'")
+            
+            # VectorStore에서 shelter 타입 문서 가져오기
+            all_data = vectorstore.get(where={"type": "shelter"})
+            
+            # 검색어 정제 (불필요한 단어 제거)
+            search_term = query.strip().lower()
+            remove_words = ["대피소", "수용인원", "최대수용인원", "몇명", "정보", 
+                        "알려줘", "의", "이", "가", "은", "는", "?", "!", " "]
+            for word in remove_words:
+                search_term = search_term.replace(word, "")
+            search_term = search_term.strip()
+            
+            print(f"[search_shelter_by_name] 정제된 검색어: '{search_term}'")
+            
+            # 시설명 매칭 (부분 일치)
+            matches = []
+            for metadata in all_data['metadatas']:
+                facility_name = metadata.get('facility_name', '')
+                facility_lower = facility_name.lower()
+                
+                # 양방향 부분 일치
+                if search_term in facility_lower or facility_lower in search_term:
+                    matches.append(metadata)
+                    print(f"[search_shelter_by_name] 매칭됨: {facility_name}")
+            
+            if not matches:
+                return f"❌ '{query}' 시설을 찾을 수 없습니다.\n시설명을 정확히 입력해주세요."
+            
+            # 결과 반환
+            if len(matches) == 1:
+                m = matches[0]
+                return f"""📍 **{m.get('facility_name')}**
+
+    ✅ **최대 수용인원: {int(m.get('capacity', 0)):,}명**
+    📍 주소: {m.get('address', 'N/A')}
+    📍 위치: {m.get('shelter_type', 'N/A')}
+    📍 시설 유형: {m.get('facility_type', 'N/A')}
+    📍 운영 상태: {m.get('operating_status', 'N/A')}"""
+            
+            else:
+                # 여러 개 발견 시
+                result = f"📍 **'{search_term}'** 관련 대피소 **{len(matches)}곳** 발견\n\n"
+                for i, m in enumerate(matches[:5], 1):  # 상위 5개만
+                    result += f"{i}. **{m.get('facility_name')}**\n"
+                    result += f"   ✅ 수용인원: **{int(m.get('capacity', 0)):,}명**\n"
+                    result += f"   📍 주소: {m.get('address', 'N/A')}\n"
+                    result += f"   📍 위치: {m.get('shelter_type', 'N/A')}\n\n"
+                
+                if len(matches) > 5:
+                    result += f"💡 외 {len(matches) - 5}곳 더 있습니다."
+                
+                return result.strip()
+            
+        except Exception as e:
+            print(f"[ERROR] search_shelter_by_name: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"❌ 검색 중 오류 발생: {str(e)}"
+    
+    # 6. Tools 리스트
+    tools = [
+        search_shelter_by_location,
+        count_shelters,
+        search_shelter_by_capacity,
+        search_disaster_guideline,
+        answer_general_knowledge,
+        search_shelter_by_name
+    ]
+    
+    # 7. LLM에 Tools 바인딩
+    llm_with_tools = llm.bind_tools(tools)
+    
+    # 8. State 정의
+    class AgentState(TypedDict):
+        messages: Annotated[list[BaseMessage], add_messages]
+        intent: str
+        rewritten_query: str
+    
+    # 9. 시스템 프롬프트
+    SYSTEM_PROMPT = """당신은 대한민국의 재난 안전 전문 AI 도우미입니다.
+
+**핵심 원칙**:
+1. **정확성 우선**: 제공된 도구 결과만 사용하고, 없는 정보는 지어내지 마세요
+2. **의도 파악**: 사용자 질문의 의도를 정확히 분류하고 적절한 도구를 선택하세요
+3. **복합 질문 처리**: 여러 의도가 섞인 질문은 순차적으로 처리하세요
+
+**도구 선택 가이드**:
+- 특정 위치 대피소 찾기 → **search_shelter_by_location**
+- 대피소 개수 세기 → **count_shelters**
+- 수용인원 기준 검색 → **search_shelter_by_capacity**
+- 재난 행동요령 → **search_disaster_guideline**
+- 재난 관련 일반 지식 (정의, 원인) → **answer_general_knowledge**
+
+**복합 질문 예시**:
+"설악산 근처인데 산사태 발생 시 어떻게 해야 해?"
+→ 1단계: search_shelter_by_location("설악산")
+→ 2단계: search_disaster_guideline("산사태")
+→ 3단계: 두 결과를 자연스럽게 통합
+
+**응답 형식**:
+- 구체적이고 실용적인 정보 제공
+- 중요 정보는 **볼드체** 강조
+- 숫자는 쉼표 구분 (1,000명)
+- 이모지 적절히 활용 (📍🚨💡📊)
+"""
+    
+    # 10. 노드 함수들
+    def intent_classifier_node(state: AgentState):
+        """의도 분류 노드"""
+        messages = state["messages"]
+        last_message = messages[-1].content
+        
+        print(f"\n[의도분류 노드] 입력: {last_message}")
+        
+        try:
+            # 의도 분류
+            intent_result = intent_chain.invoke({"query": last_message})
+            intent_data = json.loads(intent_result)
+            intent = intent_data["intent"]
+            
+            print(f"[의도분류 노드] 결과: {intent} (신뢰도: {intent_data.get('confidence', 0)})")
+            
+            return {"intent": intent}
+            
+        except Exception as e:
+            print(f"[의도분류 노드] 오류: {e}, 기본값 사용")
+            return {"intent": "general_chat"}
+    
+    def query_rewrite_node(state: AgentState):
+        """질문 재정의 노드"""
+        messages = state["messages"]
+        last_message = messages[-1].content
+        intent = state.get("intent", "")
+        
+        # 일반 대화나 일반 지식은 재정의 불필요
+        if intent in ["general_chat", "general_knowledge"]:
+            return {"rewritten_query": last_message}
+        
+        print(f"\n[질문재정의 노드] 입력: {last_message}")
+        
+        try:
+            rewritten = query_rewrite_chain.invoke({"original_query": last_message})
+            print(f"[질문재정의 노드] 결과: {rewritten}")
+            return {"rewritten_query": rewritten}
+        except Exception as e:
+            print(f"[질문재정의 노드] 오류: {e}")
+            return {"rewritten_query": last_message}
+    
+    def agent_node(state: AgentState):
+        """에이전트 추론 노드 (도구 선택 및 실행)"""
+        messages = state["messages"]
+        intent = state.get("intent", "")
+        
+        print(f"\n[에이전트 노드] 의도: {intent}")
+        
+        # 시스템 프롬프트 추가
+        if not any(isinstance(m, SystemMessage) for m in messages):
+            messages = [SystemMessage(content=SYSTEM_PROMPT)] + messages
+        
+        # LLM 호출 (도구 선택)
+        response = llm_with_tools.invoke(messages)
+        
+        return {"messages": [response]}
+    
+    def should_continue(state: AgentState):
+        """도구 실행 필요 여부 판단"""
+        messages = state["messages"]
+        last_message = messages[-1]
+        
+        # 도구 호출이 있으면 도구 실행
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+            return "tools"
+        
+        # 없으면 종료
+        return END
+    
+    # 11. 그래프 구성
+    workflow = StateGraph(AgentState)
+    
+    # 노드 추가
+    workflow.add_node("intent_classifier", intent_classifier_node)
+    workflow.add_node("query_rewrite", query_rewrite_node)
+    workflow.add_node("agent", agent_node)
+    workflow.add_node("tools", ToolNode(tools))
+    
+    # 엣지 연결
+    workflow.add_edge(START, "intent_classifier")
+    workflow.add_edge("intent_classifier", "query_rewrite")
+    workflow.add_edge("query_rewrite", "agent")
+    workflow.add_conditional_edges("agent", should_continue, ["tools", END])
+    workflow.add_edge("tools", "agent")  # 도구 실행 후 다시 에이전트로
+    
+    # 12. 메모리 체크포인트
+    memory = MemorySaver()
+    
+    # 13. 컴파일
+    app = workflow.compile(checkpointer=memory)
+    
+    print("[LangGraph] 앱 생성 완료")
+    print(f"  - 노드: intent_classifier → query_rewrite → agent ⇄ tools")
+    print(f"  - 도구: {len(tools)}개")
+    
+    return app
