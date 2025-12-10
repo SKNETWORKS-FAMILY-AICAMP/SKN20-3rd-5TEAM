@@ -19,7 +19,6 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.documents import Document
 from langchain_community.retrievers import BM25Retriever
 from langgraph.graph import StateGraph, END, START
-from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -192,13 +191,17 @@ def create_langgraph_app(vectorstore):
     
     # 5. Tools 정의
     @tool
-    def search_shelter_by_location(query: str) -> str:
+    def search_shelter_by_location(query: str) -> dict:
         """
         특정 위치의 대피소를 검색합니다.
         카카오 API로 좌표를 찾고, 가장 가까운 대피소 5곳을 반환합니다.
+        지도 표시용 구조화된 데이터를 포함합니다.
         
         Args:
             query: 위치 정보 (지명, 건물명, 주소 등)
+        
+        Returns:
+            dict: {"text": str, "structured_data": dict} 형식
         """
         try:
             # 쿼리 재정의
@@ -208,7 +211,7 @@ def create_langgraph_app(vectorstore):
             # 카카오 API로 좌표 검색
             kakao_api_key = os.getenv("KAKAO_REST_API_KEY")
             if not kakao_api_key:
-                return "카카오 API 키가 설정되지 않았습니다."
+                return {"text": "카카오 API 키가 설정되지 않았습니다.", "structured_data": None}
             
             headers = {"Authorization": f"KakaoAK {kakao_api_key}"}
             url = "https://dapi.kakao.com/v2/local/search/keyword.json"
@@ -218,9 +221,8 @@ def create_langgraph_app(vectorstore):
             data = response.json()
             
             if not data.get("documents"):
-                return f"'{query}' 위치를 찾을 수 없습니다."
-            
-            # 첫 번째 결과의 좌표
+                return {"text": f"'{query}' 위치를 찾을 수 없습니다.", "structured_data": None}
+             
             place = data["documents"][0]
             user_lat = float(place["y"])
             user_lon = float(place["x"])
@@ -241,10 +243,10 @@ def create_langgraph_app(vectorstore):
             all_data = vectorstore.get(where={"type": "shelter"})
             shelters = []
             
-            for i, metadata in enumerate(all_data['metadatas']):
+            for metadata in all_data['metadatas']:
                 try:
-                    lat = float(metadata.get('latitude', 0))
-                    lon = float(metadata.get('longitude', 0))
+                    lat = float(metadata.get('lat', 0))
+                    lon = float(metadata.get('lon', 0))
                     if lat == 0 or lon == 0:
                         continue
                     
@@ -252,12 +254,14 @@ def create_langgraph_app(vectorstore):
                     shelters.append({
                         'name': metadata.get('facility_name', 'N/A'),
                         'address': metadata.get('address', 'N/A'),
+                        'lat': lat,
+                        'lon': lon,
                         'distance': distance,
                         'capacity': int(metadata.get('capacity', 0)),
                         'shelter_type': metadata.get('shelter_type', 'N/A'),
                         'facility_type': metadata.get('facility_type', 'N/A')
                     })
-                except Exception as e:
+                except Exception:
                     continue
             
             # 거리순 정렬
@@ -265,22 +269,41 @@ def create_langgraph_app(vectorstore):
             top_5 = shelters[:5]
             
             if not top_5:
-                return f"'{place_name}' 근처에 대피소를 찾을 수 없습니다."
+                return {
+                    "text": f"'{place_name}' 근처에 대피소를 찾을 수 없습니다.",
+                    "structured_data": None
+                }
             
-            # 결과 포맷팅
-            result = f"📍 **{place_name}** 근처 대피소 {len(top_5)}곳\n\n"
+            # 텍스트 결과 포맷팅
+            result_text = f"📍 **{place_name}** 근처 대피소 {len(top_5)}곳\n\n"
             for i, s in enumerate(top_5, 1):
-                result += f"{i}. **{s['name']}**\n"
-                result += f"   📍 거리: {s['distance']:.2f}km\n"
-                result += f"   📍 주소: {s['address']}\n"
-                result += f"   📍 위치: {s['shelter_type']}\n"
-                result += f"   📍 수용인원: {s['capacity']:,}명\n\n"
+                result_text += f"{i}. **{s['name']}**\n"
+                result_text += f"   📍 거리: {s['distance']:.2f}km\n"
+                result_text += f"   📍 주소: {s['address']}\n"
+                result_text += f"   📍 위치: {s['shelter_type']}\n"
+                result_text += f"   📍 수용인원: {s['capacity']:,}명\n\n"
             
-            return result.strip()
+            # 구조화된 데이터 (지도 표시용)
+            structured_data = {
+                "location": place_name,
+                "coordinates": (user_lat, user_lon),
+                "shelters": top_5,
+                "total_count": len(all_data['metadatas'])
+            }
+            
+            return {
+                "text": result_text.strip(),
+                "structured_data": structured_data
+            }
             
         except Exception as e:
             print(f"[ERROR] search_shelter_by_location: {e}")
-            return f"검색 중 오류 발생: {str(e)}"
+            import traceback
+            traceback.print_exc()
+            return {
+                "text": f"검색 중 오류 발생: {str(e)}",
+                "structured_data": None
+            }
     
     @tool
     def count_shelters(query: str) -> str:
@@ -679,6 +702,7 @@ def create_langgraph_app(vectorstore):
         messages: Annotated[list[BaseMessage], add_messages]
         intent: str
         rewritten_query: str
+        structured_data: Optional[dict]  # 지도 표시용 구조화된 데이터
     
     # 9. 시스템 프롬프트
     SYSTEM_PROMPT = """당신은 대한민국의 재난 안전 전문 AI 도우미입니다.
@@ -785,6 +809,33 @@ def create_langgraph_app(vectorstore):
         
         return {"messages": [response]}
     
+    def tools_node_with_structured_data(state: AgentState):
+        """도구 실행 노드 (구조화된 데이터 추출 포함)"""
+        from langgraph.prebuilt import ToolNode
+        
+        # 기본 ToolNode 실행
+        tool_node = ToolNode(tools)
+        result = tool_node.invoke(state)
+        
+        # 도구 결과에서 structured_data 추출
+        messages = result.get("messages", [])
+        structured_data = None
+        
+        for message in messages:
+            if hasattr(message, "content"):
+                content = message.content
+                # dict 타입이고 structured_data 키가 있는지 확인
+                if isinstance(content, dict) and "structured_data" in content:
+                    structured_data = content["structured_data"]
+                    # 텍스트 부분만 메시지 content로 변경
+                    message.content = content.get("text", str(content))
+                    print(f"[tools_node] structured_data 추출 완료: {structured_data is not None}")
+        
+        return {
+            "messages": messages,
+            "structured_data": structured_data
+        }
+    
     def should_continue(state: AgentState):
         """도구 실행 필요 여부 판단"""
         messages = state["messages"]
@@ -804,7 +855,7 @@ def create_langgraph_app(vectorstore):
     workflow.add_node("intent_classifier", intent_classifier_node)
     workflow.add_node("query_rewrite", query_rewrite_node)
     workflow.add_node("agent", agent_node)
-    workflow.add_node("tools", ToolNode(tools))
+    workflow.add_node("tools", tools_node_with_structured_data)
     
     # 엣지 연결
     workflow.add_edge(START, "intent_classifier")

@@ -248,410 +248,87 @@ langgraph_app = None
 @app.post("/api/location/extract")
 async def extract_location(request: LocationExtractRequest = Body(...)):
     """
-    사용자 질의(Query)를 분석하여 적절한 응답을 제공합니다.
+    사용자 질의를 LangGraph Agent가 처리합니다.
     
     =========================================================================
-    [NEW] LangGraph Agent 기반 통합 처리
+    [간소화된 처리 흐름]
     =========================================================================
     
-    기존 방식 (의도 분류 → 분기 처리)에서 Agent 자동 처리로 변경:
+    사용자 쿼리 → LangGraph Agent → 구조화된 응답 반환
     
-    1. **Agent가 질문 분석**
-       - 사용자 질문의 의도를 자동으로 파악
-       - 필요한 도구를 스스로 선택하여 실행
-    
-    2. **사용 가능한 도구**
-       - search_shelter: 지역명/건물명으로 대피소 검색 (하이브리드)
-       - search_shelter_by_kakao: 카카오 API + 좌표 기반 대피소 검색
-       - search_guideline: 재난 행동요령 검색
-       - get_shelter_statistics: 대피소 통계
-    
-    3. **Agent의 장점**
-       - 자동 의도 분류 (별도 classify_user_intent 불필요)
-       - 복잡한 질문 처리 (여러 도구 조합 가능)
-       - 대화 맥락 유지 (세션 기반 메모리)
-    
-    4. **폴백 처리**
-       - LangGraph 초기화 실패 시 기존 로직 사용
+    - Agent가 자동으로 의도 분류 및 도구 선택
+    - 지도 표시용 좌표/대피소 데이터 포함 가능
+    - 재난 행동요령, 통계, 일반 대화 모두 처리
     
     =========================================================================
     """
     
     # 리소스 확인
-    if vectorstore is None or shelter_df is None:
-        return LocationExtractResponse(success=False, message="서버 초기화가 완료되지 않았습니다.")
+    if langgraph_app is None:
+        return LocationExtractResponse(
+            success=False, 
+            message="서버 초기화가 완료되지 않았습니다."
+        )
     
     # 쿼리 유효성 검사
     query = request.query.strip()
     if not query:
-        return LocationExtractResponse(success=False, message="입력 문장이 비어 있습니다.")
+        return LocationExtractResponse(
+            success=False, 
+            message="입력 문장이 비어 있습니다."
+        )
 
     print(f"[API] 사용자 쿼리: '{query}'")
     
-    # =========================================================================
-    # 쿼리 유형 분류: 단순 대피소 위치 질문 vs 복잡한 질문
-    # =========================================================================
-    # 단순 질문: "강남역 근처 대피소", "명동 대피소 어디야" → 지도 표시용 좌표/대피소 배열 반환
-    # 복잡한 질문: "강남역인데 지진 나면 어디로", "명동에서 화재 발생 시 대처법" → Agent 텍스트 응답
-    
-    # 재난 관련 키워드 목록
-    disaster_keywords = [
-        "지진", "홍수", "태풍", "화재", "폭발", "산사태", "쓰나미", 
-        "화산", "방사능", "가스", "붕괴", "테러", "전쟁",
-        "행동요령", "대처법", "대응", "조치", "주의사항", "발생하면", "발생 시"
-    ]
-    
-    # 질문에 재난 키워드가 포함되어 있는지 확인
-    has_disaster_context = any(keyword in query for keyword in disaster_keywords)
-    
-    # 단순 대피소 위치 질문인지 확인
-    shelter_keywords = ["대피소", "피난소", "피난처", "근처", "주변", "어디"]
-    has_shelter_request = any(keyword in query for keyword in shelter_keywords)
-    
-    # 라우팅 결정
-    use_agent = False
-    
-    if has_disaster_context:
-        # 재난 키워드가 있으면 무조건 Agent 사용 (복잡한 질문)
-        use_agent = True
-        print(f"[INFO] 재난 맥락 감지 → LangGraph Agent 사용")
-    elif not has_shelter_request:
-        # 대피소 관련 키워드도 없고 재난 키워드도 없으면 Agent 사용 (일반 대화 또는 통계)
-        use_agent = True
-        print(f"[INFO] 일반 질문 감지 → LangGraph Agent 사용")
-    else:
-        # 대피소 키워드만 있으면 기존 로직 사용 (단순 위치 질문)
-        use_agent = False
-        print(f"[INFO] 단순 대피소 위치 질문 감지 → 기존 로직 사용 (지도 표시)")
-    
-    # =========================================================================
-    # LangGraph Agent 사용 (복잡한 질문 처리)
-    # =========================================================================
-    if use_agent and langgraph_app is not None:
-        try:
-            print(f"[INFO] LangGraph Agent로 처리 시작")
-            
-            # 세션 ID 생성 (요청별 고유 ID)
-            session_id = f"session_{hash(query) % 100000}"
-            config = {"configurable": {"thread_id": session_id}}
-            
-            # Agent 실행
-            # - Agent가 질문을 분석하여 자동으로 도구 선택
-            # - search_shelter, search_guideline 등 적절한 도구 실행
-            # - 여러 도구를 조합하여 사용 가능
-            result = langgraph_app.invoke(
-                {"messages": [HumanMessage(content=query)]},
-                config=config
+    try:
+        # LangGraph Agent 실행
+        session_id = f"session_{hash(query) % 100000}"
+        config = {"configurable": {"thread_id": session_id}}
+        
+        result = langgraph_app.invoke(
+            {"messages": [HumanMessage(content=query)]},
+            config=config
+        )
+        
+        # Agent의 최종 응답 추출
+        final_message = result["messages"][-1]
+        
+        # Agent가 구조화된 데이터를 반환했는지 확인
+        # (structured_data가 state에 있으면 지도 표시용 데이터 포함)
+        structured_data = result.get("structured_data", None)
+        
+        if structured_data:
+            # 지도 표시용 데이터가 있는 경우
+            print(f"[INFO] 구조화된 응답 반환 (좌표 포함)")
+            return LocationExtractResponse(
+                success=True,
+                location=structured_data.get("location"),
+                coordinates=structured_data.get("coordinates"),
+                shelters=structured_data.get("shelters", []),
+                total_count=structured_data.get("total_count", 0),
+                message=final_message.content
             )
-            
-            # Agent의 최종 응답 추출
-            bot_response = result["messages"][-1].content
-            print(f"[INFO] LangGraph Agent 응답 완료 (길이: {len(bot_response)})")
-            
-            # Agent 응답을 LocationExtractResponse 형식으로 반환
-            # - 텍스트 응답 형식 (message에 포함)
-            # - 좌표/대피소 배열은 비어있음 (지도 표시 불가)
+        else:
+            # 텍스트 응답만 있는 경우
+            print(f"[INFO] 텍스트 응답 반환 (길이: {len(final_message.content)})")
             return LocationExtractResponse(
                 success=True,
                 location=None,
                 coordinates=None,
                 shelters=[],
                 total_count=0,
-                message=bot_response
+                message=final_message.content
             )
-            
-        except Exception as e:
-            print(f"[ERROR] LangGraph Agent 실행 실패: {e}")
-            print(f"[INFO] 기존 로직으로 폴백")
-            # 에러 발생 시 아래 기존 로직으로 폴백
     
-    elif use_agent and langgraph_app is None:
-        print(f"[WARNING] LangGraph Agent가 초기화되지 않음")
+    except Exception as e:
+        print(f"[ERROR] LangGraph Agent 실행 실패: {e}")
+        import traceback
+        traceback.print_exc()
         return LocationExtractResponse(
             success=False,
-            message="챗봇 시스템이 초기화되지 않았습니다. 잠시 후 다시 시도해주세요."
+            message="처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
         )
-    
-    # =========================================================================
-    # 기존 로직 (단순 대피소 위치 검색만 처리)
-    # =========================================================================
-    # 주의: 이 코드는 "강남역 대피소"와 같은 단순 위치 질문만 처리합니다.
-    # 재난 행동요령, 통계, 일반 대화 등은 위의 LangGraph Agent가 처리합니다.
-    # =========================================================================
-    
-    print(f"[API] 단순 대피소 위치 검색 처리 시작 - query: '{query}'")
-    
-    # =====================================================================
-    # STEP 1: 사용자 쿼리에서 순수 지명만 추출 (불필요한 단어 제거)
-    # =====================================================================
-    # 예: "강남역 대피소 알려줘" -> "강남역"
-    # 예: "명동 근처 피난소" -> "명동"
-    location_query = query
-    
-    # 대피소 관련 키워드 제거 리스트
-    remove_keywords = [
-        "대피소", "피난소", "피난처", "근처", "주변", "가까운", "어디", "위치",
-        "찾아줘", "알려줘", "검색", "보여줘", "있어", "는?", "은?", "?", "!",
-        "좀", "요", "주세요", "해줘", "해주세요", "있나요", "있어요"
-    ]
-    
-    for keyword in remove_keywords:
-        location_query = location_query.replace(keyword, "")
-    
-    # 공백 정리 (여러 공백을 하나로 통합)
-    location_query = " ".join(location_query.split()).strip()
-    
-    print(f"[DEBUG] 정제된 위치 쿼리: '{location_query}'")
-    
-    # 정제 후 비어있으면 원본 쿼리 사용
-    if not location_query:
-        location_query = query
-        print(f"[DEBUG] 정제 결과가 비어있어 원본 쿼리 사용")
-    
-    # =====================================================================
-    # STEP 2: 카카오 로컬 API 키 확인
-    # =====================================================================
-    kakao_key = os.getenv("KAKAO_REST_API_KEY")
-    if not kakao_key:
-        print(f"[ERROR] KAKAO_REST_API_KEY 없음")
-        return LocationExtractResponse(success=False, message="KAKAO_REST_API_KEY 환경변수가 없습니다.")
-    
-    # =====================================================================
-    # STEP 3: 여러 지명이 포함된 경우 우선순위 판단
-    # =====================================================================
-    # 예: "잠실 롯데월드" -> "롯데월드" 우선 선택 (관광명소)
-    # 우선순위: 1=관광명소/문화시설, 2=교통시설(역), 3=행정구역, 4=기타
-    location_parts = location_query.split()
-    selected_location = location_query
-    
-    if len(location_parts) > 1:
-        print(f"[DEBUG] 여러 지명 감지: {location_parts}, 카카오 API로 우선순위 판단")
-        
-        url = "https://dapi.kakao.com/v2/local/search/keyword.json"
-        headers = {"Authorization": f"KakaoAK {kakao_key}"}
-        
-        best_candidate = None
-        best_priority = 999
-        
-        # 카테고리별 우선순위 정의
-        priority_categories = {
-            1: ["관광명소", "문화시설", "여가시설", "공공기관", "테마파크"],
-            2: ["교통,수송", "지하철역"],
-            3: ["행정구역"],
-        }
-        
-        # 각 지명을 카카오 API로 검색하여 카테고리 확인
-        for part in location_parts:
-            resp = requests.get(url, headers=headers, params={"query": part, "size": 5})
-            if resp.status_code == 200:
-                docs = resp.json().get("documents", [])
-                if docs:
-                    doc = docs[0]
-                    category_name = doc.get("category_name", "")
-                    print(f"[DEBUG] '{part}' 검색 결과 - category: {category_name}")
-                    
-                    # 카테고리 우선순위 판단
-                    priority = 4  # 기본값 (기타)
-                    for pri, keywords in priority_categories.items():
-                        if any(keyword in category_name for keyword in keywords):
-                            priority = pri
-                            break
-                    
-                    # 더 높은 우선순위(낮은 숫자)면 선택
-                    if priority < best_priority:
-                        best_priority = priority
-                        best_candidate = part
-                        print(f"[DEBUG] 우선순위 {priority}: '{part}' 선택 (category: {category_name})")
-        
-        # 우선순위가 가장 높은 지명 선택
-        if best_candidate:
-            selected_location = best_candidate
-            print(f"[DEBUG] 최종 선택된 위치: '{selected_location}' (우선순위: {best_priority})")
-        else:
-            # API 검색 실패시 첫 번째 지명 사용
-            selected_location = location_parts[0]
-            print(f"[DEBUG] API 검색 실패, 첫 번째 지명 사용: '{selected_location}'")
-    
-    location_query = selected_location
-    
-    # =====================================================================
-    # STEP 4: 카카오 API를 사용하여 최종 위치 검색 (위/경도 좌표 획득)
-    # =====================================================================
-    url = "https://dapi.kakao.com/v2/local/search/keyword.json"
-    headers = {"Authorization": f"KakaoAK {kakao_key}"}
-    params = {"query": location_query, "size": 1}
-    
-    print(f"[DEBUG] 카카오 API 최종 검색 - query: '{location_query}'")
-    resp = requests.get(url, headers=headers, params=params)
-    print(f"[DEBUG] 카카오 API 응답 - status: {resp.status_code}")
-    
-    if resp.status_code != 200:
-        return LocationExtractResponse(success=False, message=f"카카오 API 오류: {resp.status_code}")
-        
-    data = resp.json()
-    print(f"[DEBUG] 카카오 API 결과 개수: {len(data.get('documents', []))}")
-    
-    # =====================================================================
-    # 카카오 API 검색 실패 시 LangGraph Agent를 사용한 대피소 검색
-    # =====================================================================
-    if not data.get("documents"):
-            print(f"[WARNING] 카카오 API에서 '{location_query}' 위치를 찾지 못함")
-            print(f"[INFO] LangGraph Agent를 사용하여 대피소 검색 시도")
-            
-            # LangGraph Agent가 초기화되어 있는지 확인
-            if langgraph_app is None:
-                print(f"[ERROR] LangGraph Agent가 초기화되지 않음")
-                return LocationExtractResponse(
-                    success=False, 
-                    message=f"'{location_query}' 위치를 찾을 수 없습니다. 다른 지역명을 입력해 주세요."
-                )
-            
-            try:
-                # LangGraph Agent에게 대피소 검색 요청
-                # - Agent가 search_shelter 도구를 사용하여 하이브리드 검색 수행
-                # - 질문 재정의(Query Rewriting)를 통해 검색 정확도 향상
-                # - Vector DB + BM25 앙상블 검색으로 키워드 매칭 강화
-                print(f"[DEBUG] LangGraph Agent 호출 - 쿼리: '{query}'")
-                
-                # 세션 ID 생성 (임시)
-                session_id = f"temp_{hash(query) % 10000}"
-                config = {"configurable": {"thread_id": session_id}}
-                
-                # Agent 실행
-                result = langgraph_app.invoke(
-                    {"messages": [HumanMessage(content=query)]},
-                    config=config
-                )
-                
-                # Agent의 응답 추출
-                bot_response = result["messages"][-1].content
-                print(f"[DEBUG] LangGraph Agent 응답 (길이: {len(bot_response)})")
-                
-                # Agent 응답을 message로 반환
-                # - 좌표 기반 검색이 아닌 하이브리드 검색 결과
-                # - shelters 배열은 비어있지만 message에 대피소 정보 포함
-                return LocationExtractResponse(
-                    success=True,
-                    location=location_query,
-                    coordinates=None,  # 좌표 정보 없음 (카카오 API 실패)
-                    shelters=[],  # Agent 응답은 텍스트 형태로 message에 포함
-                    total_count=0,
-                    message=bot_response  # Agent의 검색 결과 텍스트
-                )
-                
-            except Exception as e:
-                print(f"[ERROR] LangGraph Agent 실행 실패: {e}")
-                return LocationExtractResponse(
-                    success=False, 
-                    message=f"'{location_query}' 위치를 찾을 수 없습니다. 다른 지역명을 입력해 주세요."
-                )
-        
-    # =====================================================================
-    # 카카오 API 검색 성공 시 기존 로직 사용 (좌표 기반 대피소 검색)
-    # =====================================================================
-    # - 카카오 API로 획득한 위/경도 좌표 사용
-    # - Haversine 공식으로 사용자 위치 ↔ 대피소 간 직선 거리 계산
-    # - 거리순 정렬 후 가장 가까운 5개 대피소 반환
-    
-    # 좌표 추출
-    place = data["documents"][0]
-    lat = float(place["y"])  # 위도
-    lon = float(place["x"])  # 경도
-    place_name = place.get("place_name", location_query)
-    
-    print(f"[DEBUG] 좌표 추출 성공 - place_name: {place_name}, lat: {lat}, lon: {lon}")
-    
-    # =====================================================================
-    # STEP 5: VectorStore에서 모든 대피소 데이터 가져와서 거리 계산
-    # =====================================================================
-    import math
-    
-    def haversine(lat1, lon1, lat2, lon2):
-        """
-        Haversine 공식: 구면상의 두 점 사이의 최단 거리 계산
-        
-        Args:
-            lat1, lon1: 첫 번째 점의 위도/경도 (사용자 위치)
-            lat2, lon2: 두 번째 점의 위도/경도 (대피소 위치)
-        
-        Returns:
-            float: 두 점 사이의 거리 (단위: km)
-        """
-        R = 6371  # 지구 반지름 (km)
-        phi1, phi2 = math.radians(lat1), math.radians(lat2)
-        d_phi = math.radians(lat2 - lat1)
-        d_lambda = math.radians(lon2 - lon1)
-        a = math.sin(d_phi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(d_lambda/2)**2
-        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    
-    # VectorStore에서 shelter 타입 문서만 필터링하여 가져오기
-    # - filter: {"type": "shelter"} 조건으로 대피소 데이터만 추출
-    all_data = vectorstore.get(where={"type": "shelter"})
-    all_metadatas = all_data.get('metadatas', [])
-    
-    print(f"[DEBUG] VectorStore에서 {len(all_metadatas)}개 대피소 메타데이터 가져옴")
-    
-    shelters = []
-    
-    # 각 대피소의 좌표를 사용하여 거리 계산
-    for metadata in all_metadatas:
-        # shelter 타입 문서만 처리 (이중 확인)
-        if metadata.get('type') != 'shelter':
-            continue
-            
-        # 좌표 정보 추출 (documents.py에서 영문 키로 저장됨)
-        s_lat = metadata.get('lat')  # 대피소 위도
-        s_lon = metadata.get('lon')  # 대피소 경도
-        
-        if s_lat is not None and s_lon is not None:
-            try:
-                s_lat = float(s_lat)
-                s_lon = float(s_lon)
-                
-                # Haversine 공식으로 사용자 위치 ↔ 대피소 간 거리 계산
-                distance = haversine(lat, lon, s_lat, s_lon)
-                
-                # 대피소 정보 객체 생성
-                shelter_info = {
-                    'name': metadata.get('facility_name', 'N/A'),  # 시설명
-                    'address': metadata.get('address', 'N/A'),     # 주소
-                    'lat': s_lat,                                   # 위도
-                    'lon': s_lon,                                   # 경도
-                    'capacity': int(metadata.get('capacity', 0)),  # 수용인원
-                    'distance': distance                            # 거리 (km)
-                }
-                shelters.append(shelter_info)
-                
-            except (ValueError, TypeError):
-                # 좌표 변환 실패 시 해당 대피소는 건너뜀
-                continue
-    
-    print(f"[DEBUG] 총 {len(shelters)}개 대피소의 거리 계산 완료")
-    
-    # =====================================================================
-    # STEP 6: 거리순 정렬 후 상위 5개 반환
-    # =====================================================================
-    shelters.sort(key=lambda x: x['distance'])  # 거리 오름차순 정렬
-    top_shelters = shelters[:5]  # 가장 가까운 5개 선택
-    
-    print(f"[DEBUG] 상위 5개 대피소 선택 완료")
-    for i, s in enumerate(top_shelters):
-        print(f"[DEBUG]   {i+1}. {s['name']} ({s['distance']:.2f}km)")
-    
-    # 결과 반환
-    # - success: True (검색 성공)
-    # - location: 검색된 장소명 (예: "강남역")
-    # - coordinates: (위도, 경도) 튜플
-    # - shelters: 가장 가까운 대피소 5개 리스트
-    # - total_count: VectorDB에 저장된 전체 대피소 개수
-    return LocationExtractResponse(
-        success=True,
-        location=place_name,
-        coordinates=(lat, lon),
-        shelters=top_shelters,
-        total_count=len(all_metadatas),
-        message="OK"
-    )
+
 
 
 # -----------------------------------------------------------------------------
