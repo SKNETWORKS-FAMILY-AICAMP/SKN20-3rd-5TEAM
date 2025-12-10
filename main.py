@@ -141,33 +141,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage
 from langchain_core.tools import tool
 from typing import TypedDict, Annotated
-
-# Simple EnsembleRetriever implementation
-class EnsembleRetriever:
-    """간단한 앙상블 리트리버 구현"""
-    def __init__(self, retrievers, weights=None):
-        self.retrievers = retrievers
-        self.weights = weights or [1.0 / len(retrievers)] * len(retrievers)
-    
-    def invoke(self, query):
-        all_docs = []
-        for retriever, weight in zip(self.retrievers, self.weights):
-            try:
-                docs = retriever.invoke(query)
-                for doc in docs:
-                    doc.metadata['retriever_weight'] = weight
-                    all_docs.append(doc)
-            except:
-                continue
-        # 중복 제거 및 가중치 기반 정렬
-        seen = set()
-        unique_docs = []
-        for doc in all_docs:
-            doc_id = doc.page_content[:100]
-            if doc_id not in seen:
-                seen.add(doc_id)
-                unique_docs.append(doc)
-        return unique_docs[:10]
+from langchain_classic.retrievers import EnsembleRetriever
 
 # -----------------------------------------------------------------------------
 # 2. Pydantic 모델 정의 (Request/Response 스키마)
@@ -198,7 +172,18 @@ class ChatbotResponse(BaseModel):
 # -----------------------------------------------------------------------------
 
 def create_hybrid_retrievers():
-    """하이브리드 리트리버 생성 (Vector + BM25)"""
+    """
+    하이브리드 검색 리트리버 생성 (Vector 검색 + BM25 키워드 검색)
+    
+    대피소와 재난 가이드라인에 대해 각각 앙상블 리트리버를 생성합니다.
+    Vector 검색과 BM25 검색을 결합하여 의미 기반 검색과 키워드 매칭을 모두 활용합니다.
+    
+    Returns:
+        tuple[EnsembleRetriever, EnsembleRetriever]: 
+            - 대피소 하이브리드 리트리버 (가중치: Vector 0.6, BM25 0.4)
+            - 재난 가이드라인 하이브리드 리트리버 (가중치: Vector 0.7, BM25 0.3)
+            - 실패 시 (None, None) 반환
+    """
     if vectorstore is None:
         return None, None
     
@@ -208,7 +193,7 @@ def create_hybrid_retrievers():
             search_kwargs={"k": 5, "filter": {"type": "shelter"}}
         )
         guideline_vector_retriever = vectorstore.as_retriever(
-            search_kwargs={"k": 3, "filter": {"type": "disaster_guideline"}}
+            search_kwargs={"k": 5, "filter": {"type": "disaster_guideline"}}
         )
         
         # 2. BM25 Retriever 생성
@@ -252,7 +237,20 @@ def create_hybrid_retrievers():
 
 
 def create_langgraph_app():
-    """LangGraph Agent 생성"""
+    """
+    LangGraph 기반 대화형 AI Agent 생성
+    
+    주요 구성요소:
+        - LLM: GPT-4o-mini (의도 분류, 질문 재정의, 도구 선택)
+        - 의도 분류 체인: 사용자 질문을 7가지 카테고리로 분류
+        - 질문 재정의 체인: 검색 최적화를 위한 쿼리 변환
+        - Tools: 5개 도구 (대피소 검색, 개수 집계, 수용인원 검색, 행동요령, 일반 지식)
+        - StateGraph: 의도분류 → 질문재정의 → 에이전트 → 도구실행 흐름
+        - Memory: 세션 기반 대화 히스토리 저장
+    
+    Returns:
+        CompiledGraph: 컴파일된 LangGraph 애플리케이션
+    """
     
     # 1. LLM 초기화
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
@@ -327,11 +325,22 @@ def create_langgraph_app():
     @tool
     def search_shelter_by_location(query: str) -> str:
         """
-        특정 위치의 대피소를 검색합니다.
-        카카오 API로 좌표를 찾고, 가장 가까운 대피소 5곳을 반환합니다.
+        특정 위치 기준으로 가까운 대피소를 검색합니다.
+        
+        처리 흐름:
+            1. 쿼리 재정의로 검색 최적화
+            2. 카카오 로컬 API로 위치의 좌표 검색
+            3. VectorStore에서 모든 대피소 데이터 조회
+            4. Haversine 공식으로 거리 계산
+            5. 거리순 정렬 후 상위 5개 반환
         
         Args:
-            query: 위치 정보 (지명, 건물명, 주소 등)
+            query (str): 위치 정보 (지명, 건물명, 주소 등)
+                예: "강남역", "롯데월드", "서울시청"
+        
+        Returns:
+            str: 대피소 검색 결과 (마크다운 형식)
+                - 위치명, 거리, 주소, 위치 유형, 수용인원 포함
         """
         try:
             # 쿼리 재정의
@@ -404,11 +413,12 @@ def create_langgraph_app():
             # 결과 포맷팅
             result = f"📍 **{place_name}** 근처 대피소 {len(top_5)}곳\n\n"
             for i, s in enumerate(top_5, 1):
+                walk_time = int(s['distance'] * 12)  # 1km = 약 12분
                 result += f"{i}. **{s['name']}**\n"
-                result += f"   📍 거리: {s['distance']:.2f}km\n"
+                result += f"   🚶 거리: {s['distance']:.2f}km (도보 약 {walk_time}분)\n"
                 result += f"   📍 주소: {s['address']}\n"
                 result += f"   📍 위치: {s['shelter_type']}\n"
-                result += f"   📍 수용인원: {s['capacity']:,}명\n\n"
+                result += f"   👥 수용인원: {s['capacity']:,}명\n\n"
             
             return result.strip()
             
@@ -419,10 +429,25 @@ def create_langgraph_app():
     @tool
     def count_shelters(query: str) -> str:
         """
-        특정 조건(지역, 위치유형 등)에 맞는 대피소 개수를 셉니다.
+        조건에 맞는 대피소 개수를 집계합니다. 
+        "몇 개", "몇 곳", "개수" 같은 키워드가 있으면 개수만, 
+        없으면 개수와 함께 상위 5개 대피소 목록을 보여줍니다.
+        
+        처리 흐름:
+            1. 쿼리 재정의로 검색어 최적화
+            2. 카카오 API로 위치 좌표 검색 (선택적)
+            3. 하이브리드 검색으로 조건에 맞는 대피소 검색
+            4. 중복 제거 및 거리 계산 (좌표가 있는 경우)
+            5. 사용자 의도에 따라 개수만 또는 개수+목록 반환
         
         Args:
-            query: 검색 조건 (예: "서울 지하", "부산 민방위")
+            query (str): 검색 조건
+                예: "서울 지하 대피소 몇 개야?", "부산 민방위 대피소", "강남구 대피소 알려줘"
+        
+        Returns:
+            str: 대피소 개수 (또는 개수+목록) (마크다운 형식)
+                - 개수만 원하는 경우: 총 개수만 반환
+                - 목록도 원하는 경우: 총 개수 + 상위 5개 대피소 정보
         """
         try:
             # 쿼리 재정의
@@ -432,22 +457,101 @@ def create_langgraph_app():
             if shelter_hybrid is None:
                 return "검색 시스템이 초기화되지 않았습니다."
             
+            # 카카오 API로 좌표 검색 시도
+            kakao_api_key = os.getenv("KAKAO_REST_API_KEY")
+            user_lat, user_lon, place_name = None, None, None
+            
+            if kakao_api_key:
+                try:
+                    headers = {"Authorization": f"KakaoAK {kakao_api_key}"}
+                    url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+                    params = {"query": rewritten}
+                    
+                    response = requests.get(url, headers=headers, params=params)
+                    data = response.json()
+                    
+                    if data.get("documents"):
+                        place = data["documents"][0]
+                        user_lat = float(place["y"])
+                        user_lon = float(place["x"])
+                        place_name = place["place_name"]
+                        print(f"[count_shelters] 좌표: {place_name} ({user_lat}, {user_lon})")
+                except Exception as e:
+                    print(f"[count_shelters] 카카오 API 실패: {e}")
+            
             # 하이브리드 검색
             results = shelter_hybrid.invoke(rewritten)
             
-            # 중복 제거
+            # 중복 제거 및 거리 계산
             seen = set()
-            count = 0
+            shelters = []
+            
             for doc in results:
                 name = doc.metadata.get('facility_name', '')
                 if name and name not in seen:
                     seen.add(name)
-                    count += 1
+                    
+                    shelter_info = {
+                        'name': name,
+                        'address': doc.metadata.get('address', 'N/A'),
+                        'shelter_type': doc.metadata.get('shelter_type', 'N/A'),
+                        'capacity': int(doc.metadata.get('capacity', 0))
+                    }
+                    
+                    # 좌표가 있으면 거리 계산
+                    if user_lat and user_lon:
+                        try:
+                            s_lat = float(doc.metadata.get('latitude', 0))
+                            s_lon = float(doc.metadata.get('longitude', 0))
+                            if s_lat != 0 and s_lon != 0:
+                                from math import radians, sin, cos, sqrt, atan2
+                                R = 6371
+                                dlat = radians(s_lat - user_lat)
+                                dlon = radians(s_lon - user_lon)
+                                a = sin(dlat/2)**2 + cos(radians(user_lat)) * cos(radians(s_lat)) * sin(dlon/2)**2
+                                c = 2 * atan2(sqrt(a), sqrt(1-a))
+                                shelter_info['distance'] = R * c
+                        except:
+                            pass
+                    
+                    shelters.append(shelter_info)
             
-            if count == 0:
+            if not shelters:
                 return f"'{query}' 조건에 맞는 대피소를 찾을 수 없습니다."
             
-            return f"**'{query}'** 조건에 맞는 대피소는 총 **{count}개**입니다."
+            # 거리순 정렬 (거리 정보가 있는 경우)
+            if user_lat and user_lon and any('distance' in s for s in shelters):
+                shelters.sort(key=lambda x: x.get('distance', float('inf')))
+            
+            count = len(shelters)
+            
+            # 사용자가 개수만 원하는지 판단
+            count_only_keywords = ['몇 개', '몇개', '몇 곳', '몇곳', '개수', '갯수', '몇']
+            wants_count_only = any(keyword in query for keyword in count_only_keywords)
+            
+            # 개수만 원하는 경우
+            if wants_count_only:
+                return f"**'{query}'** 조건에 맞는 대피소는 총 **{count}개**입니다."
+            
+            # 개수 + 목록을 원하는 경우
+            result = f"**'{query}'** 조건에 맞는 대피소는 총 **{count}개**입니다."
+            
+            # 상위 5개 대피소 정보 추가
+            if place_name:
+                result += f"\n\n📍 **{place_name}** 기준 가까운 순서 (상위 5개)\n\n"
+            else:
+                result += f"\n\n📍 검색 결과 (상위 5개)\n\n"
+            
+            for i, s in enumerate(shelters[:5], 1):
+                result += f"{i}. **{s['name']}**\n"
+                if 'distance' in s:
+                    walk_time = int(s['distance'] * 12)  # 1km = 약 12분
+                    result += f"   🚶 거리: {s['distance']:.2f}km (도보 약 {walk_time}분)\n"
+                result += f"   📍 주소: {s['address']}\n"
+                result += f"   📍 위치: {s['shelter_type']}\n"
+                result += f"   📍 수용인원: {s['capacity']:,}명\n\n"
+            
+            return result.strip()
             
         except Exception as e:
             print(f"[ERROR] count_shelters: {e}")
@@ -458,25 +562,78 @@ def create_langgraph_app():
         """
         수용인원 기준으로 대피소를 검색합니다.
         
+        처리 흐름:
+            1. 정규식으로 수용인원 숫자 추출 (천, 만 단위 처리)
+            2. 쿼리에서 지역명 추출 시도
+            3. 카카오 API로 지역 좌표 검색 (선택적)
+            4. 수용인원 조건으로 대피소 필터링
+            5. 거리순 또는 수용인원순 정렬
+            6. 상위 10개 반환
+        
         Args:
-            query: 수용인원 조건 (예: "천 명 이상", "100명 수용 가능")
+            query (str): 수용인원 조건 및 선택적 위치
+                예: "천 명 이상", "서울 1000명 수용 가능", "부산 500명 이상"
+        
+        Returns:
+            str: 대피소 검색 결과 (마크다운 형식)
+                - 수용인원, 거리(선택적), 주소, 위치 유형 포함
+                - 정렬: 좌표 있음(거리순) / 없음(수용인원 내림차순)
         """
         try:
             # 숫자 추출
             import re
             numbers = re.findall(r'\d+', query)
+            
+            # 자연어 표현 처리
             if not numbers:
-                return "수용인원을 명확히 입력해주세요. (예: 1000명 이상)"
-            
-            min_capacity = int(numbers[0])
-            
-            # 숫자 단위 처리 (천, 만)
-            if '천' in query:
-                min_capacity *= 1000
-            elif '만' in query:
-                min_capacity *= 10000
+                # "큰", "넓은", "많이" 같은 표현 처리
+                if any(keyword in query for keyword in ['큰', '넓은', '대규모', '많이']):
+                    min_capacity = 1000  # 기본 1000명
+                    print(f"[search_shelter_by_capacity] 자연어 처리: 대형 대피소 ({min_capacity}명 이상)")
+                elif any(keyword in query for keyword in ['가족', '소규모']):
+                    min_capacity = 50  # 가족 단위
+                    print(f"[search_shelter_by_capacity] 자연어 처리: 소규모 대피소 ({min_capacity}명 이상)")
+                else:
+                    return "수용인원을 명확히 입력해주세요. (예: 1000명 이상, 큰 대피소)"
+            else:
+                min_capacity = int(numbers[0])
+                
+                # 숫자 단위 처리 (천, 만)
+                if '천' in query:
+                    min_capacity *= 1000
+                elif '만' in query:
+                    min_capacity *= 10000
             
             print(f"[search_shelter_by_capacity] 최소 수용인원: {min_capacity}명")
+            
+            # 카카오 API로 좌표 검색 시도 (지역명이 있는 경우)
+            kakao_api_key = os.getenv("KAKAO_REST_API_KEY")
+            user_lat, user_lon, place_name = None, None, None
+            
+            if kakao_api_key:
+                try:
+                    # 쿼리에서 지역명 추출 시도
+                    location_keywords = query.replace('천', '').replace('만', '').replace('명', '').replace('이상', '').replace('수용', '').replace('가능', '')
+                    for num in numbers:
+                        location_keywords = location_keywords.replace(num, '')
+                    location_keywords = location_keywords.strip()
+                    
+                    if location_keywords and len(location_keywords) >= 2:
+                        headers = {"Authorization": f"KakaoAK {kakao_api_key}"}
+                        url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+                        params = {"query": location_keywords}
+                        
+                        response = requests.get(url, headers=headers, params=params)
+                        data = response.json()
+                        
+                        if data.get("documents"):
+                            place = data["documents"][0]
+                            user_lat = float(place["y"])
+                            user_lon = float(place["x"])
+                            place_name = place["place_name"]
+                            print(f"[search_shelter_by_capacity] 좌표: {place_name} ({user_lat}, {user_lon})")
+                except Exception as e:
+                    print(f"[search_shelter_by_capacity] 카카오 API 실패: {e}")
             
             # 모든 대피소 가져오기
             all_data = vectorstore.get(where={"type": "shelter"})
@@ -485,23 +642,56 @@ def create_langgraph_app():
             for metadata in all_data['metadatas']:
                 capacity = int(metadata.get('capacity', 0))
                 if capacity >= min_capacity:
-                    shelters.append({
+                    shelter_info = {
                         'name': metadata.get('facility_name', 'N/A'),
                         'address': metadata.get('address', 'N/A'),
                         'capacity': capacity,
                         'shelter_type': metadata.get('shelter_type', 'N/A')
-                    })
+                    }
+                    
+                    # 좌표가 있으면 거리 계산
+                    if user_lat and user_lon:
+                        try:
+                            s_lat = float(metadata.get('latitude', 0))
+                            s_lon = float(metadata.get('longitude', 0))
+                            if s_lat != 0 and s_lon != 0:
+                                from math import radians, sin, cos, sqrt, atan2
+                                R = 6371
+                                dlat = radians(s_lat - user_lat)
+                                dlon = radians(s_lon - user_lon)
+                                a = sin(dlat/2)**2 + cos(radians(user_lat)) * cos(radians(s_lat)) * sin(dlon/2)**2
+                                c = 2 * atan2(sqrt(a), sqrt(1-a))
+                                shelter_info['distance'] = R * c
+                        except:
+                            pass
+                    
+                    shelters.append(shelter_info)
             
-            # 수용인원 내림차순 정렬
-            shelters.sort(key=lambda x: x['capacity'], reverse=True)
-            top_10 = shelters[:10]
-            
-            if not top_10:
+            if not shelters:
                 return f"{min_capacity:,}명 이상 수용 가능한 대피소를 찾을 수 없습니다."
             
-            result = f"📊 **{min_capacity:,}명 이상** 수용 가능한 대피소 **{len(shelters)}곳** 중 상위 10곳\n\n"
+            # 정렬: 거리 정보가 있으면 거리순, 없으면 수용인원 내림차순
+            if user_lat and user_lon and any('distance' in s for s in shelters):
+                shelters.sort(key=lambda x: x.get('distance', float('inf')))
+                sort_type = "거리순"
+            else:
+                shelters.sort(key=lambda x: x['capacity'], reverse=True)
+                sort_type = "수용인원 내림차순"
+            
+            top_10 = shelters[:10]
+            
+            if place_name:
+                result = f"📊 **{place_name}** 근처 **{min_capacity:,}명 이상** 수용 가능한 대피소\n"
+                result += f"총 **{len(shelters)}곳** 중 가까운 순서 (상위 10곳)\n\n"
+            else:
+                result = f"📊 **{min_capacity:,}명 이상** 수용 가능한 대피소\n"
+                result += f"총 **{len(shelters)}곳** 중 상위 10곳 ({sort_type})\n\n"
+            
             for i, s in enumerate(top_10, 1):
                 result += f"{i}. **{s['name']}** ({s['capacity']:,}명)\n"
+                if 'distance' in s:
+                    walk_time = int(s['distance'] * 12)  # 1km = 약 12분
+                    result += f"   🚶 거리: {s['distance']:.2f}km (도보 약 {walk_time}분)\n"
                 result += f"   📍 {s['address']}\n"
                 result += f"   📍 위치: {s['shelter_type']}\n\n"
             
@@ -514,10 +704,20 @@ def create_langgraph_app():
     @tool
     def search_disaster_guideline(query: str) -> str:
         """
-        재난 행동요령을 검색합니다.
+        재난 유형별 행동요령을 검색합니다.
+        
+        처리 흐름:
+            1. 쿼리 재정의로 검색어 최적화
+            2. 하이브리드 검색으로 관련 행동요령 검색
+            3. 상위 3개 결과 통합
         
         Args:
-            query: 재난 유형 (예: "지진", "화재", "산사태")
+            query (str): 재난 유형
+                예: "지진", "화재", "산사태", "태풍", "홍수"
+        
+        Returns:
+            str: 재난 행동요령 (마크다운 형식)
+                - 재난 유형별 대응 방법 및 주의사항
         """
         try:
             # 쿼리 재정의
@@ -533,10 +733,33 @@ def create_langgraph_app():
             if not results:
                 return f"'{query}' 관련 행동요령을 찾을 수 없습니다."
             
-            # 상위 3개 결과 통합
-            combined = "\n\n".join([doc.page_content for doc in results[:3]])
+            # LLM을 사용하여 행동요령을 구조화
+            combined_content = "\n\n".join([doc.page_content for doc in results[:3]])
             
-            return f"🚨 **{query} 행동요령**\n\n{combined}"
+            structure_prompt = f"""다음 재난 행동요령을 우선순위에 따라 구조화하여 정리해주세요.
+
+재난 유형: {query}
+행동요령 내용:
+{combined_content}
+
+다음 형식으로 정리:
+## 🚨 즉시 행동 (생존 우선)
+- 가장 먼저 해야 할 행동 2-3가지
+
+## 📍 대피 방법
+- 안전한 대피 방법 및 경로
+
+## ⚠️ 주의사항
+- 추가로 주의해야 할 사항
+
+간결하고 명확하게 불릿 포인트로 작성하되, 중복 내용은 제거하세요."""
+            
+            try:
+                structured_response = llm_creative.invoke([HumanMessage(content=structure_prompt)])
+                return f"🚨 **{query} 행동요령**\n\n{structured_response.content}"
+            except:
+                # LLM 실패 시 원본 반환
+                return f"🚨 **{query} 행동요령**\n\n{combined_content}"
             
         except Exception as e:
             print(f"[ERROR] search_disaster_guideline: {e}")
@@ -545,11 +768,22 @@ def create_langgraph_app():
     @tool
     def answer_general_knowledge(query: str) -> str:
         """
-        재난 관련 일반 지식 질문에 답변합니다. (정의, 원인, 특징 등)
-        VectorDB에 없는 정보는 LLM의 사전 학습 지식을 활용합니다.
+        재난 관련 일반 지식 질문에 답변합니다.
+        
+        VectorDB에 저장되지 않은 재난의 정의, 원인, 특징 등을
+        LLM의 사전 학습 지식을 활용하여 답변합니다.
+        
+        처리 흐름:
+            1. LLM에게 재난 전문가 역할 부여
+            2. 간결하고 이해하기 쉬운 답변 생성 (200자 이내)
+            3. 정의, 특징, 원인을 불릿 포인트로 정리
         
         Args:
-            query: 일반 지식 질문 (예: "지진이 뭐야", "쓰나미란")
+            query (str): 일반 지식 질문
+                예: "지진이 뭐야", "쓰나미란", "태풍의 원인"
+        
+        Returns:
+            str: 일반 지식 답변 (마크다운 형식)
         """
         try:
             print(f"[answer_general_knowledge] 질문: {query}")
@@ -622,7 +856,24 @@ def create_langgraph_app():
     
     # 10. 노드 함수들
     def intent_classifier_node(state: AgentState):
-        """의도 분류 노드"""
+        """
+        사용자 질문의 의도를 분류하는 노드
+        
+        7가지 카테고리로 분류:
+            1. shelter_search: 특정 위치 대피소 찾기
+            2. shelter_count: 대피소 개수 세기
+            3. shelter_capacity: 수용인원 기준 검색
+            4. disaster_guideline: 재난 행동요령
+            5. hybrid_location_disaster: 위치 + 재난 복합
+            6. general_knowledge: 일반 지식
+            7. general_chat: 일반 대화
+        
+        Args:
+            state (AgentState): 현재 그래프 상태
+        
+        Returns:
+            dict: {"intent": str} - 분류된 의도
+        """
         messages = state["messages"]
         last_message = messages[-1].content
         
@@ -644,7 +895,25 @@ def create_langgraph_app():
             return {"intent": "general_chat"}
     
     def query_rewrite_node(state: AgentState):
-        """질문 재정의 노드"""
+        """
+        검색 최적화를 위한 질문 재정의 노드
+        
+        BM25 키워드 검색에 최적화된 형태로 질문을 변환합니다.
+        - 핵심 키워드 추출
+        - 동의어 추가
+        - 지역명 다양한 형태 표현
+        - 위치 유형 명확화
+        
+        Args:
+            state (AgentState): 현재 그래프 상태
+        
+        Returns:
+            dict: {"rewritten_query": str} - 재정의된 쿼리
+        
+        Note:
+            일반 대화(general_chat)와 일반 지식(general_knowledge)은
+            재정의하지 않고 원본 유지
+        """
         messages = state["messages"]
         last_message = messages[-1].content
         intent = state.get("intent", "")
@@ -664,7 +933,20 @@ def create_langgraph_app():
             return {"rewritten_query": last_message}
     
     def agent_node(state: AgentState):
-        """에이전트 추론 노드 (도구 선택 및 실행)"""
+        """
+        에이전트 추론 노드 - LLM이 적절한 도구를 선택하는 노드
+        
+        처리 흐름:
+            1. 시스템 프롬프트를 메시지에 추가
+            2. LLM이 상황에 맞는 도구 선택
+            3. 도구 호출 정보를 포함한 응답 생성
+        
+        Args:
+            state (AgentState): 현재 그래프 상태
+        
+        Returns:
+            dict: {"messages": [AIMessage]} - LLM 응답 메시지
+        """
         messages = state["messages"]
         intent = state.get("intent", "")
         
@@ -680,7 +962,15 @@ def create_langgraph_app():
         return {"messages": [response]}
     
     def should_continue(state: AgentState):
-        """도구 실행 필요 여부 판단"""
+        """
+        다음 단계 결정 함수 - 도구 실행 필요 여부 판단
+        
+        Args:
+            state (AgentState): 현재 그래프 상태
+        
+        Returns:
+            str: "tools" (도구 실행 필요) 또는 END (종료)
+        """
         messages = state["messages"]
         last_message = messages[-1]
         
@@ -727,13 +1017,20 @@ def create_langgraph_app():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    서버 시작/종료 시 실행되는 초기화 및 정리 작업
-    앱 실행 시:
-    - Vector DB 로드 및 초기화
-    - 대피소 데이터 로드
-    - LangGraph Agent 초기화
-    앱 종료 시:
-    - 리소스 정리 (현재는 별도 정리 작업 없음)
+    FastAPI 애플리케이션 수명주기 관리자
+    
+    서버 시작 시:
+        - OpenAI 임베딩 모델 초기화
+        - ChromaDB 벡터 저장소 로드
+        - 대피소 CSV 데이터 로드
+        - 하이브리드 리트리버 생성 (BM25 + Vector)
+        - LangGraph Agent 초기화
+    
+    서버 종료 시:
+        - 리소스 정리 (현재 구현 없음)
+    
+    Yields:
+        애플리케이션 실행 컨텍스트
     """
     global vectorstore, shelter_df, embeddings
     global shelter_hybrid_retriever, guideline_hybrid_retriever, langgraph_app
@@ -803,33 +1100,30 @@ langgraph_app = None
 @app.post("/api/location/extract")
 async def extract_location(request: LocationExtractRequest = Body(...)):
     """
-    사용자 질의(Query)를 분석하여 적절한 응답을 제공합니다.
+    사용자 질의를 분석하여 대피소 정보 또는 Agent 응답을 제공합니다.
     
-    =========================================================================
-    [NEW] LangGraph Agent 기반 통합 처리
-    =========================================================================
+    라우팅 전략:
+        - 재난 키워드 포함 → LangGraph Agent 사용
+        - 대피소 키워드만 → 카카오 API 기반 좌표 검색
+        - 기타 → LangGraph Agent 사용
     
-    기존 방식 (의도 분류 → 분기 처리)에서 Agent 자동 처리로 변경:
+    LangGraph Agent 처리:
+        - 의도 분류 → 질문 재정의 → 도구 선택 → 실행
+        - 복잡한 질문 (복합 의도) 자동 처리
+        - 세션 기반 대화 맥락 유지
     
-    1. **Agent가 질문 분석**
-       - 사용자 질문의 의도를 자동으로 파악
-       - 필요한 도구를 스스로 선택하여 실행
+    기존 로직 처리 (단순 위치 질문):
+        - 카카오 로컬 API로 좌표 검색
+        - Haversine 거리 계산
+        - 지도 표시용 좌표/대피소 배열 반환
     
-    2. **사용 가능한 도구**
-       - search_shelter: 지역명/건물명으로 대피소 검색 (하이브리드)
-       - search_shelter_by_kakao: 카카오 API + 좌표 기반 대피소 검색
-       - search_guideline: 재난 행동요령 검색
-       - get_shelter_statistics: 대피소 통계
+    Args:
+        request (LocationExtractRequest): 사용자 쿼리
     
-    3. **Agent의 장점**
-       - 자동 의도 분류 (별도 classify_user_intent 불필요)
-       - 복잡한 질문 처리 (여러 도구 조합 가능)
-       - 대화 맥락 유지 (세션 기반 메모리)
-    
-    4. **폴백 처리**
-       - LangGraph 초기화 실패 시 기존 로직 사용
-    
-    =========================================================================
+    Returns:
+        LocationExtractResponse: 검색 결과
+            - Agent 사용 시: message에 텍스트 응답
+            - 기존 로직 시: coordinates + shelters 배열
     """
     
     # 리소스 확인
@@ -1123,14 +1417,21 @@ async def extract_location(request: LocationExtractRequest = Body(...)):
     
     def haversine(lat1, lon1, lat2, lon2):
         """
-        Haversine 공식: 구면상의 두 점 사이의 최단 거리 계산
+        Haversine 공식을 사용한 구면 거리 계산
+        
+        지구를 완전한 구로 가정하여 두 좌표 간의 최단 거리를 계산합니다.
         
         Args:
-            lat1, lon1: 첫 번째 점의 위도/경도 (사용자 위치)
-            lat2, lon2: 두 번째 점의 위도/경도 (대피소 위치)
+            lat1 (float): 시작점 위도 (도 단위)
+            lon1 (float): 시작점 경도 (도 단위)
+            lat2 (float): 도착점 위도 (도 단위)
+            lon2 (float): 도착점 경도 (도 단위)
         
         Returns:
-            float: 두 점 사이의 거리 (단위: km)
+            float: 두 점 사이의 거리 (킬로미터)
+        
+        Note:
+            지구 반지름 6371km 사용
         """
         R = 6371  # 지구 반지름 (km)
         phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -1252,8 +1553,15 @@ class ShelterSearchRequest(BaseModel):
 @app.get("/")
 async def read_root():
     """
-    메인 페이지 (웹 인터페이스)
-    - shelter_1.0.html 파일을 제공합니다.
+    메인 페이지 제공
+    
+    웹 인터페이스용 HTML 파일을 반환합니다.
+    
+    Returns:
+        FileResponse: shelter_1.0.html 파일
+    
+    Raises:
+        HTTPException: HTML 파일을 찾을 수 없는 경우 (404)
     """
     template_path = Path(__file__).parent / "shelter_1.0.html"
     if not template_path.exists():
@@ -1267,8 +1575,15 @@ async def read_root():
 @app.get("/api/health")
 async def health_check():
     """
-    서버 헬스 체크
-    - 로드밸런서나 모니터링 시스템에서 서버 생존 여부를 확인할 때 사용
+    서버 상태 확인 엔드포인트
+    
+    로드밸런서, 모니터링 시스템, 헬스 체크에 사용됩니다.
+    
+    Returns:
+        dict: 서버 상태 정보
+            - status: "ok"
+            - vectorstore_ready: VectorStore 초기화 여부
+            - shelter_data_ready: 대피소 데이터 로드 여부
     """
     return {
         "status": "ok",
@@ -1280,8 +1595,17 @@ async def health_check():
 @app.get("/api/status")
 async def get_api_status():
     """
-    상세 API 상태 확인
-    - DB 로드 상태, LLM API 키 존재 여부 등 시스템 전반적인 상태 반환
+    상세 시스템 상태 조회
+    
+    서버, LLM, 데이터베이스 등 전체 시스템의 상태를 반환합니다.
+    
+    Returns:
+        dict: 시스템 상태 정보
+            - server_ready: 서버 실행 상태
+            - llm_available: OpenAI API 키 존재 여부
+            - vectorstore_ready: VectorStore 초기화 여부
+            - total_shelters: 로드된 대피소 개수
+            - shelter_data_ready: 대피소 데이터 로드 여부
     """
     # OPENAI_API_KEY 확인 (환경변수)
     openai_available = bool(os.getenv("OPENAI_API_KEY"))
@@ -1305,9 +1629,29 @@ async def get_api_status():
 @app.get("/api/shelters/nearest")
 async def get_nearest_shelters(lat: float, lon: float, k: int = 5):
     """
-    현위치 기준 가장 가까운 대피소 검색
-    - VectorStore의 메타데이터를 활용한 거리 계산 방식 사용
-    - shelter 타입 문서들의 메타데이터에서 좌표 정보를 추출하여 거리 계산
+    GPS 좌표 기준 가까운 대피소 검색
+    
+    사용자의 현재 위치(위도/경도)를 기준으로
+    가장 가까운 대피소 k개를 검색합니다.
+    
+    처리 흐름:
+        1. VectorStore에서 모든 대피소 메타데이터 조회
+        2. Haversine 공식으로 각 대피소까지의 거리 계산
+        3. 거리순 정렬 후 상위 k개 반환
+    
+    Args:
+        lat (float): 사용자 위도 (EPSG4326)
+        lon (float): 사용자 경도 (EPSG4326)
+        k (int, optional): 반환할 대피소 개수. 기본값 5
+    
+    Returns:
+        dict: 검색 결과
+            - user_location: 사용자 좌표
+            - shelters: 대피소 목록 (거리순)
+            - total_count: 반환된 대피소 개수
+    
+    Note:
+        VectorStore 사용 불가 시 shelter_df로 폴백
     """
     print(f"[API] get_nearest_shelters 호출됨: lat={lat}, lon={lon}, k={k}")
     print(f"[API] shelter_df 상태: {shelter_df is not None}")
@@ -1451,20 +1795,36 @@ async def get_nearest_shelters(lat: float, lon: float, k: int = 5):
 @app.post("/api/chatbot", response_model=ChatbotResponse)
 async def chatbot_endpoint(request: ChatbotRequest):
     """
-    LangGraph Agent 기반 고급 챗봇 엔드포인트
+    LangGraph Agent 기반 대화형 챗봇 API
     
-    특징:
-    - 하이브리드 검색 (Vector + BM25)
-    - 질문 재정의 (Query Rewriting)
-    - Agent + Tools 아키텍처
-    - 통계 기능 (수용인원 집계)
-    - 세션 기반 대화 기록 유지
+    주요 기능:
+        - 하이브리드 검색 (Vector 검색 + BM25 키워드 검색)
+        - 자동 질문 재정의 (검색 정확도 향상)
+        - Agent + Tools 아키텍처 (자동 도구 선택)
+        - 복합 질문 처리 (여러 도구 순차 실행)
+        - 세션 기반 대화 맥락 유지
+        - 대피소 통계 및 집계 기능
+    
+    처리 흐름:
+        1. 세션 ID로 대화 컨텍스트 로드
+        2. LangGraph Agent 실행
+        3. 의도 분류 → 질문 재정의 → 도구 선택 → 실행
+        4. 최종 응답 생성 및 반환
     
     Args:
-        request: ChatbotRequest (message, session_id)
+        request (ChatbotRequest): 챗봇 요청
+            - message: 사용자 메시지
+            - session_id: 세션 ID (기본값: "default")
     
     Returns:
-        ChatbotResponse (response, session_id)
+        ChatbotResponse: 챗봇 응답
+            - response: AI 응답 메시지
+            - session_id: 세션 ID
+    
+    Raises:
+        HTTPException: 
+            - 503: LangGraph Agent 초기화 실패
+            - 500: 챗봇 처리 중 오류 발생
     """
     try:
         if langgraph_app is None:
