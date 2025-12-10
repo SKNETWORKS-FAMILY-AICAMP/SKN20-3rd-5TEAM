@@ -113,38 +113,51 @@ def create_langgraph_app(vectorstore):
     llm_creative = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)  # 일반 지식용
     
     # 2. 의도 분류 체인
+    # 2. 의도 분류 체인
     intent_classification_prompt = ChatPromptTemplate.from_messages([
         ("system", """당신은 사용자 질문의 의도를 정확하게 분류하는 AI입니다.
 
-질문을 다음 카테고리 중 하나로 분류하세요:
+    질문을 다음 카테고리 중 하나로 분류하세요:
 
-1. **shelter_search**: 특정 위치의 대피소 찾기
-   - 예: "한라산 근처 대피소", "강남역 대피소", "동대문맨션 대피소 정보"
-   
-2. **shelter_count**: 특정 조건의 대피소 개수 세기
-   - 예: "서울 대피소 개수", "지하 대피소 몇 개", "부산 민방위 대피소는 총 몇 개"
-   
-3. **shelter_capacity**: 수용인원 기준 대피소 찾기
-   - 예: "천 명 이상 수용 가능한 대피소", "100명 수용 가능한 근처 대피소"
-   
-4. **disaster_guideline**: 재난 행동요령 질문
-   - 예: "지진 발생 시 행동요령", "화재 대처법", "산사태 났을 때"
-   
-5. **hybrid_location_disaster**: 위치 + 재난 상황 복합 질문
-   - 예: "설악산 근처인데 산사태 발생 시", "강남역에서 지진 나면"
-   
-6. **general_knowledge**: 재난 관련 일반 지식 (정의, 원인 등)
-   - 예: "지진이 뭐야", "쓰나미란", "태풍의 원인"
-   
-7. **general_chat**: 일반 대화
-   - 예: "안녕", "고마워", "날씨 어때"
+    1. **hybrid_location_disaster**: 위치 + 재난 상황 복합 질문 ⭐ 우선순위 1
+    - 예: "설악산 근처인데 산사태 발생 시", "강남역에서 지진 나면", "명동 화재"
+    - 키워드: 지명 + (지진/화재/산사태/홍수 등)
 
-**응답 형식**: JSON
-{{
-    "intent": "카테고리명",
-    "confidence": 0.95,
-    "reason": "분류 근거"
-}}"""),
+    2. **shelter_info**: 특정 대피소의 상세 정보 조회 ⭐ 새로 추가
+    - 예: "동대문맨션 수용인원", "서울역 대피소 정보", "롯데월드 최대 수용"
+    - 키워드: 시설명 + (수용인원/정보/면적 등)
+
+    3. **shelter_search**: 특정 위치의 대피소 찾기
+    - 예: "한라산 근처 대피소", "강남역 대피소"
+    - 키워드: 지명 + (근처/주변/대피소) WITHOUT 재난 키워드
+    
+    4. **shelter_count**: 특정 조건의 대피소 개수 세기
+    - 예: "서울 대피소 개수", "지하 대피소 몇 개"
+    
+    5. **shelter_capacity**: 수용인원 기준 대피소 찾기
+    - 예: "천 명 이상 수용 가능한 대피소"
+    - 키워드: 숫자 + (이상/이하/수용)
+    
+    6. **disaster_guideline**: 재난 행동요령만 질문
+    - 예: "지진 발생 시 행동요령" (위치 정보 없음)
+    
+    7. **general_knowledge**: 재난 관련 일반 지식
+    - 예: "지진이 뭐야", "쓰나미란"
+    
+    8. **general_chat**: 일반 대화
+    - 예: "안녕", "고마워"
+
+    **중요 우선순위**: 
+    - "위치 + 재난"이 함께 있으면 무조건 **hybrid_location_disaster**
+    - "시설명 + 수용인원/정보"는 **shelter_info**
+    - "위치 + 근처/주변"만 있고 재난 없으면 **shelter_search**
+
+    **응답 형식**: JSON
+    {{
+        "intent": "카테고리명",
+        "confidence": 0.95,
+        "reason": "분류 근거"
+    }}"""),
         ("user", "{query}")
     ])
     
@@ -498,7 +511,155 @@ def create_langgraph_app(vectorstore):
             import traceback
             traceback.print_exc()
             return f"❌ 검색 중 오류 발생: {str(e)}"
-    
+    @tool
+    def search_location_with_disaster(query: str) -> str:
+        """
+        특정 위치에서 재난 발생 시 대피소와 행동요령을 함께 제공합니다.
+        위치 기반 대피소 검색 + 재난 행동요령을 통합하여 반환합니다.
+        
+        Args:
+            query: 위치 + 재난 상황 (예: "설악산 근처 산사태", "강남역에서 지진")
+        
+        Examples:
+            - "설악산 근처인데 산사태 발생 시" → 설악산 대피소 + 산사태 행동요령
+            - "명동에서 지진 나면" → 명동 대피소 + 지진 행동요령
+        """
+        try:
+            print(f"[search_location_with_disaster] 복합 질문 처리: {query}")
+            
+            # 1단계: 위치명 추출 (재난 키워드 제거)
+            disaster_keywords = [
+                "지진", "홍수", "태풍", "화재", "폭발", "산사태", "쓰나미", 
+                "화산", "방사능", "가스", "붕괴", "테러",
+                "발생", "발생하면", "발생 시", "났을 때", "나면", "때", 
+                "근처인데", "에서", "어떻게", "대처", "행동요령"
+            ]
+            
+            location_query = query
+            detected_disaster = None
+            
+            # 재난 유형 감지 및 제거
+            for keyword in disaster_keywords:
+                if keyword in query:
+                    if keyword in ["지진", "홍수", "태풍", "화재", "폭발", "산사태", 
+                                "쓰나미", "화산", "방사능", "가스", "붕괴", "테러"]:
+                        detected_disaster = keyword
+                    location_query = location_query.replace(keyword, "")
+            
+            # 위치 쿼리 정제
+            location_query = location_query.strip()
+            print(f"[search_location_with_disaster] 추출된 위치: '{location_query}'")
+            print(f"[search_location_with_disaster] 감지된 재난: '{detected_disaster}'")
+            
+            if not detected_disaster:
+                return "재난 유형을 파악할 수 없습니다. 예: '설악산 산사태', '강남역 지진'"
+            
+            # 2단계: 카카오 API로 위치 좌표 검색
+            kakao_api_key = os.getenv("KAKAO_REST_API_KEY")
+            if not kakao_api_key:
+                return "카카오 API 키가 설정되지 않았습니다."
+            
+            headers = {"Authorization": f"KakaoAK {kakao_api_key}"}
+            url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+            params = {"query": location_query}
+            
+            response = requests.get(url, headers=headers, params=params)
+            data = response.json()
+            
+            if not data.get("documents"):
+                return f"'{location_query}' 위치를 찾을 수 없습니다."
+            
+            # 좌표 추출
+            place = data["documents"][0]
+            user_lat = float(place["y"])
+            user_lon = float(place["x"])
+            place_name = place["place_name"]
+            
+            print(f"[search_location_with_disaster] 좌표: {place_name} ({user_lat}, {user_lon})")
+            
+            # 3단계: 근처 대피소 검색
+            def haversine(lat1, lon1, lat2, lon2):
+                from math import radians, sin, cos, sqrt, atan2
+                R = 6371
+                dlat = radians(lat2 - lat1)
+                dlon = radians(lon2 - lon1)
+                a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+                c = 2 * atan2(sqrt(a), sqrt(1-a))
+                return R * c
+            
+            all_data = vectorstore.get(where={"type": "shelter"})
+            shelters = []
+            
+            for metadata in all_data['metadatas']:
+                try:
+                    lat = float(metadata.get('lat', 0))
+                    lon = float(metadata.get('lon', 0))
+                    if lat == 0 or lon == 0:
+                        continue
+                    
+                    distance = haversine(user_lat, user_lon, lat, lon)
+                    shelters.append({
+                        'name': metadata.get('facility_name', 'N/A'),
+                        'address': metadata.get('address', 'N/A'),
+                        'distance': distance,
+                        'capacity': int(metadata.get('capacity', 0)),
+                        'shelter_type': metadata.get('shelter_type', 'N/A')
+                    })
+                except Exception:
+                    continue
+            
+            shelters.sort(key=lambda x: x['distance'])
+            top_3 = shelters[:3]  # 가장 가까운 3곳만
+            
+            # 4단계: 재난 행동요령 검색
+            guideline_text = ""
+            if guideline_hybrid:
+                try:
+                    guideline_results = guideline_hybrid.invoke(detected_disaster)
+                    if guideline_results:
+                        # 상위 2개 결과만 사용 (간결하게)
+                        guideline_text = "\n\n".join([
+                            doc.page_content for doc in guideline_results[:2]
+                        ])
+                except Exception as e:
+                    print(f"[search_location_with_disaster] 가이드라인 검색 실패: {e}")
+                    guideline_text = f"{detected_disaster} 관련 행동요령을 찾을 수 없습니다."
+            
+            # 5단계: 통합 결과 생성
+            result = f"""🚨 **{place_name} 근처 {detected_disaster} 발생 시 대응 가이드**
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    📍 **가장 가까운 대피소 {len(top_3)}곳**
+
+    """
+            
+            for i, s in enumerate(top_3, 1):
+                result += f"{i}. **{s['name']}** ({s['distance']:.2f}km)\n"
+                result += f"   📍 {s['address']}\n"
+                result += f"   📍 위치: {s['shelter_type']} | 수용: {s['capacity']:,}명\n\n"
+            
+            result += f"""━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    🚨 **{detected_disaster} 행동요령**
+
+    {guideline_text}
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    💡 **즉시 행동 체크리스트**
+    ✅ 가장 가까운 대피소로 이동
+    ✅ 위 행동요령을 숙지하고 침착하게 대응
+    ✅ 119 신고 (필요 시)
+    """
+            
+            return result.strip()
+            
+        except Exception as e:
+            print(f"[ERROR] search_location_with_disaster: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"복합 검색 중 오류 발생: {str(e)}"
     # 6. Tools 리스트
     tools = [
         search_shelter_by_location,
@@ -506,7 +667,8 @@ def create_langgraph_app(vectorstore):
         search_shelter_by_capacity,
         search_disaster_guideline,
         answer_general_knowledge,
-        search_shelter_by_name
+        search_shelter_by_name,
+        search_location_with_disaster
     ]
     
     # 7. LLM에 Tools 바인딩
@@ -527,17 +689,36 @@ def create_langgraph_app(vectorstore):
 3. **복합 질문 처리**: 여러 의도가 섞인 질문은 순차적으로 처리하세요
 
 **도구 선택 가이드**:
-- 특정 위치 대피소 찾기 → **search_shelter_by_location**
-- 대피소 개수 세기 → **count_shelters**
-- 수용인원 기준 검색 → **search_shelter_by_capacity**
-- 재난 행동요령 → **search_disaster_guideline**
-- 재난 관련 일반 지식 (정의, 원인) → **answer_general_knowledge**
+- 위치 + 재난 복합 질문 → search_location_with_disaster
+   - "설악산 근처인데 산사태 발생 시" → search_location_with_disaster("설악산 산사태")
+   - "강남역에서 지진 나면" → search_location_with_disaster("강남역 지진")
+   - "명동 화재 났을 때" → search_location_with_disaster("명동 화재")
+   
+- 특정 시설명이 포함된 질문 → search_shelter_by_name
+   - "동대문맨션 수용인원" → search_shelter_by_name("동대문맨션")
+   - "서울역 대피소 정보" → search_shelter_by_name("서울역")
+   
+- "근처", "주변" 키워드만 → search_shelter_by_location
+   - "강남역 근처 대피소" → search_shelter_by_location("강남역")
+   - "명동 주변 피난소" → search_shelter_by_location("명동")
 
-**복합 질문 예시**:
-"설악산 근처인데 산사태 발생 시 어떻게 해야 해?"
-→ 1단계: search_shelter_by_location("설악산")
-→ 2단계: search_disaster_guideline("산사태")
-→ 3단계: 두 결과를 자연스럽게 통합
+- "X명 이상/이하" 조건 → search_shelter_by_capacity
+   - "1000명 이상 수용 가능한 대피소" → search_shelter_by_capacity("1000명 이상")
+
+- "개수", "몇 개" → count_shelters
+   - "서울 지하 대피소 몇 개?" → count_shelters("서울 지하")
+
+- 재난 행동요령만 → search_disaster_guideline
+   - "지진 발생 시 행동요령" → search_disaster_guideline("지진")
+   - (위치 정보 없이 행동요령만 필요한 경우)
+
+- 재난 일반 지식 → answer_general_knowledge
+   - "지진이 뭐야?" → answer_general_knowledge("지진이 뭐야")
+
+**중요 판단 기준**:
+- 질문에 "위치 + 재난"이 함께 있으면 → search_location_with_disaster
+- 질문에 "시설명 + 정보 요청"이 있으면 → search_shelter_by_name
+- 질문에 "위치 + 근처/주변"만 있으면 → search_shelter_by_location
 
 **응답 형식**:
 - 구체적이고 실용적인 정보 제공
