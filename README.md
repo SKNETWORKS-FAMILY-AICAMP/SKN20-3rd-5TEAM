@@ -12,13 +12,20 @@
 </p>
 
 <p align="center">
-  <a href="#-프로젝트-개요">프로젝트 개요</a> •
-  <a href="#-전체-파이프라인">전체 파이프라인</a> •
-  <a href="#-기술-스택">기술 스택</a> •
-  <a href="#-설치--실행">설치 & 실행</a> •
-  <a href="#-streamlit-챗봇">Streamlit 챗봇</a> •
-  <a href="#-테스트-계획--결과">테스트 결과</a> •
-  <a href="#-산출물-정리">산출물 정리</a>
+## 💻 기술 스택
+
+| 분류 | 사용 기술 |
+|------|-----------|
+| 언어 | <img src="https://img.shields.io/badge/Python-3776AB.svg?style=flat&logo=python&logoColor=white" /> <span style="display:inline-block; width:180px;">Python</span> |
+| 백엔드 API | <img src="https://img.shields.io/badge/FastAPI-009688.svg?style=flat&logo=fastapi&logoColor=white" /> <span style="display:inline-block; width:180px;">FastAPI</span> |
+| 프론트엔드 | <img src="https://img.shields.io/badge/HTML5-E34F26.svg?style=flat&logo=html5&logoColor=white" /> <span style="display:inline-block; width:180px;">HTML</span> |
+| 프론트엔드 | <img src="https://img.shields.io/badge/JavaScript-F7DF1E.svg?style=flat&logo=javascript&logoColor=black" /> <span style="display:inline-block; width:180px;">JavaScript</span> |
+| 프레임워크 | <img src="https://img.shields.io/badge/LangChain-1E8C7E.svg?style=flat&logo=chainlink&logoColor=white" /> <span style="display:inline-block; width:180px;">LangChain</span> |
+| 웹 UI | <img src="https://img.shields.io/badge/Streamlit-FF4B4B.svg?style=flat&logo=streamlit&logoColor=white" /> <span style="display:inline-block; width:180px;">Streamlit</span> |
+| 임베딩 모델 | <img src="https://img.shields.io/badge/OpenAI%20Embedding-000000.svg?style=flat&logo=openai&logoColor=white" /> <span style="display:inline-block; width:180px;">OpenAI</span> |
+| 벡터 DB | <img src="https://img.shields.io/badge/ChromaDB-16C47F.svg?style=flat&logo=databricks&logoColor=white" /> <span style="display:inline-block; width:180px;">ChromaDB</span> |
+| 데이터 전처리 | <img src="https://img.shields.io/badge/Pandas-150458.svg?style=flat&logo=pandas&logoColor=white" /> <span style="display:inline-block; width:180px;">pandas</span> |
+| 환경 변수 관리 | <img src="https://img.shields.io/badge/Dotenv-9ACD32.svg?style=flat&logo=dotenv&logoColor=white" /> <span style="display:inline-block; width:180px;">python-dotenv (.env)</span> |
 </p>
 
 ---
