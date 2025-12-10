@@ -22,7 +22,6 @@
 | 프레임워크 | <img src="https://img.shields.io/badge/LangChain-1E8C7E.svg?style=flat&logo=chainlink&logoColor=white" /> <span style="display:inline-block; width:180px;">LangChain</span> |
 | 프레임워크 | <img src="https://img.shields.io/badge/LangGraph-1E8C7E.svg?style=flat&logo=chainlink&logoColor=white" /> <span style="display:inline-block; width:180px;">LangGraph</span> |
 | 프레임워크 | <img src="https://img.shields.io/badge/FastAPI-009688.svg?style=flat&logo=fastapi&logoColor=white" /> <span style="display:inline-block; width:180px;">FastAPI</span> |
-| 웹 UI | <img src="https://img.shields.io/badge/Streamlit-FF4B4B.svg?style=flat&logo=streamlit&logoColor=white" /> <span style="display:inline-block; width:180px;">Streamlit</span> |
 | 임베딩 모델 | <img src="https://img.shields.io/badge/OpenAI%20Embedding-000000.svg?style=flat&logo=openai&logoColor=white" /> <span style="display:inline-block; width:180px;">OpenAI</span> |
 | 벡터 DB | <img src="https://img.shields.io/badge/ChromaDB-16C47F.svg?style=flat&logo=databricks&logoColor=white" /> <span style="display:inline-block; width:180px;">ChromaDB</span> |
 | 데이터 전처리 | <img src="https://img.shields.io/badge/Pandas-150458.svg?style=flat&logo=pandas&logoColor=white" /> <span style="display:inline-block; width:180px;">pandas</span> |
