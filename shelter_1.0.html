@@ -15,6 +15,8 @@
         .llm-badge { padding: 4px 10px; border-radius: 14px; font-size: 11px; font-weight: bold; }
         .llm-on { background-color: #10B981; color: white; }
         .llm-off { background-color: #6B7280; color: white; }
+        .llm-on {background-color: #10B981;color: #ffffff;}
+        .llm-off {background-color: #6b7280;color: #ffffff;}
     </style>
 </head>
 
@@ -26,7 +28,7 @@
     <div class="flex flex-col bg-gray-200 h-[250px] md:h-[85vh]">
         <header class="flex-shrink-0 p-4 bg-red-600 text-white flex justify-between items-center shadow-md">
             <div>
-                <h1 class="text-lg font-bold">🚨 가까운 대피소 찾기 챗봇</h1>
+                <h1 class="text-lg font-bold">🚨 재난 안전 챗봇</h1>
                 <p class="text-[10px] opacity-90">민방위대피시설 정보 기반</p>
             </div>
             <div id="llm-status" class="llm-badge llm-off">LLM OFF</div>
@@ -150,7 +152,9 @@ function addMessage(sender, text, isResult = false) {
         wrap.className = "flex justify-start";
         if (isResult) {
             /* 🔽🔽 여기 색을 초록톤으로 변경 */
-            box.className = "bg-emerald-500 text-white p-3 rounded-2xl rounded-tl-none max-w-[85%] shadow-lg";
+            box.style.backgroundColor = "#22c55e";  // 초록색
+            box.style.color = "#FFFFFF";            // 흰색
+            box.className = "p-3 rounded-2xl rounded-tl-none max-w-[90%] shadow-lg";
             box.innerHTML = `<p class="font-bold text-lg mb-1">📍 대피소 검색 결과</p>${text}`;
         } else {
             box.className = "bg-gray-100 text-gray-800 p-3 rounded-2xl rounded-tl-none max-w-[80%] shadow-sm";
@@ -401,8 +405,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (API_AVAILABLE) {
         initialMessageEl.innerHTML =
-            `<span class="text-purple-500 font-semibold">저는 MCK입니다 🤖</span><br>
-             <span class="text-blue-700 font-bold">주소 / 장소명을 입력하거나 "현위치"로 검색해 보세요.</span>`;
+            `<span class="text-black-600 font-normal">저는 </span>
+        <span class="text-red-600 font-bold text-lg">재난안전 챗봇</span>
+        <span class="text-black-600 font-normal">입니다 🤖</span><br>
+             <span class="text-blue-700 font-bold">주소 / 장소명</span>
+        <span class="text-black-700 font-normal">을 입력하거나</span>
+        <span class="text-blue-700 font-bold">"현위치"</span>
+        <span class="text-black-700 font-normal">로 검색해 보세요.</span>`;
         setControlsDisabled(false);
     } else {
         initialMessageEl.innerHTML =
@@ -410,5 +419,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 });
 </script>
+
 </body>
 </html>
