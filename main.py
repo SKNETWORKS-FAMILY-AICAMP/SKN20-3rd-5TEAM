@@ -1872,8 +1872,7 @@ if __name__ == "__main__":
     import os
     if os.path.exists(cert_file) and os.path.exists(key_file):
         print(f"[INFO] SSL 인증서를 사용하여 HTTPS 서버 시작")
-        # print(f"[INFO] 주소: https://61.78.100.228:8443/")
-        print(f"[INFO] 주소: https://222.106.254.193:8443/")
+        print(f"[INFO] 주소: https://61.78.100.233:8443/")
         
         uvicorn.run(
             app,

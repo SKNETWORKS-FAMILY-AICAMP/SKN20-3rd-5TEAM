@@ -5,3 +5,11 @@ chroma_db/
 .env
 *.csv
 *__pycache__
+shelter_chatbot/cert/key.pem
+shelter_chatbot/cert/key_backup_20251210_161207.pem
+shelter_chatbot/cert/cert.pem
+main.py
+shelter_1.0.html
+generate_ssl_cert.py
+main.py
+shelter_1.0.html

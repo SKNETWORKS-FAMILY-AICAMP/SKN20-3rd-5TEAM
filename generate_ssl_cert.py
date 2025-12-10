@@ -15,7 +15,7 @@ import os
 import shutil
 
 # 현재 IP 주소 설정
-CURRENT_IP = "222.106.254.193"
+CURRENT_IP = "172.24.112.1"
 
 print("=" * 60)
 print("🔐 SSL 인증서 자동 재생성")
