@@ -99,6 +99,7 @@ let map = null;
 let userMarker = null;
 let shelterMarkers = [];
 let openInfoWindows = [];
+let currentUserPosition = null;  // 현위치 저장용
 
 const chatWindow = document.getElementById('chat-window');
 const chatInput = document.getElementById('chat-input');
@@ -303,6 +304,9 @@ async function handleChatInput() {
     // 2. 대피소 정보가 있으면 지도 표시
     if (result.shelters && result.shelters.length > 0 && result.coordinates) {
         displayShelterResults(result.location, result.coordinates, result.shelters);
+    }  else {
+        // 3. 지도 정보가 없으면 현위치로 리셋
+        resetMapToCurrentLocation();
     }
 
     setControlsDisabled(false);
@@ -339,6 +343,54 @@ function displayShelterResultsCurrent(locationName, coords, shelters) {
 
     showMapWithMultipleShelters(coords[0], coords[1], shelters, locationName);
     setControlsDisabled(false);
+}
+
+/* ───────────────────────────────────────────────────────────── */
+/* 지도를 현위치로 리셋                                           */
+/* ───────────────────────────────────────────────────────────── */
+function resetMapToCurrentLocation() {
+    if (!map || !currentUserPosition) return;
+    
+    // 기존 대피소 마커 제거
+    shelterMarkers.forEach(m => m.setMap(null));
+    shelterMarkers = [];
+    closeAllInfoWindows();
+    
+    // 현위치로 지도 이동
+    map.setCenter(currentUserPosition.position);
+    map.setZoom(14);
+    
+    // 현위치 마커가 없으면 다시 생성
+    if (!userMarker || !userMarker.getMap()) {
+        userMarker = new naver.maps.Marker({
+            map: map,
+            position: currentUserPosition.position,
+            icon: {
+                content: `<div style="background:#4299E1;color:white;padding:6px 10px;border-radius:12px;font-weight:bold;box-shadow:0 2px 6px rgba(0,0,0,0.3);">📍 현재 위치</div>`,
+                anchor: new naver.maps.Point(50, 60)
+            }
+        });
+        
+        const userInfoWindow = new naver.maps.InfoWindow({
+            content: `
+                <div style="padding:15px;min-width:200px;">
+                    <div style="font-weight:bold;color:#1f2937;margin-bottom:8px;">📍 현재 위치</div>
+                    <div style="color:#6b7280;font-size:13px;">
+                        위도: ${currentUserPosition.lat.toFixed(6)}<br>
+                        경도: ${currentUserPosition.lon.toFixed(6)}
+                    </div>
+                </div>
+            `
+        });
+        
+        naver.maps.Event.addListener(userMarker, "click", () => {
+            closeAllInfoWindows();
+            userInfoWindow.open(map, userMarker);
+            openInfoWindows.push(userInfoWindow);
+        });
+    }
+    
+    console.log('지도를 현위치로 리셋:', currentUserPosition.lat, currentUserPosition.lon);
 }
 
 /* ───────────────────────────────────────────────────────────── */
@@ -419,12 +471,128 @@ function showMapWithMultipleShelters(centerLat, centerLon, shelters, locationNam
     map.fitBounds(bounds, { padding: 60 });
 }
 
+/* ───────────────────────────────────────────────────────────── */
+/* 초기 지도 설정 및 현위치 표시                                   */
+/* ───────────────────────────────────────────────────────────── */
+function initializeMap() {
+    if (typeof naver === 'undefined') {
+        console.error('Naver Maps API가 로드되지 않았습니다.');
+        return;
+    }
+
+    // 기본 서울 중심 좌표 (서울시청)
+    const defaultCenter = new naver.maps.LatLng(37.5665, 126.9780);
+    
+    // 지도 초기화
+    map = new naver.maps.Map("map", {
+        center: defaultCenter,
+        zoom: 12,
+        minZoom: 8,
+        maxZoom: 18
+    });
+
+    // 지도 클릭 시 정보창 닫기
+    naver.maps.Event.addListener(map, "click", closeAllInfoWindows);
+
+    // 현위치 자동 표시 시도
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            // 성공 시
+            (position) => {
+                const userLat = position.coords.latitude;
+                const userLon = position.coords.longitude;
+                const userPosition = new naver.maps.LatLng(userLat, userLon);
+
+                // 현위치 저장 (지도 정보 없을 때 사용)
+                currentUserPosition = { lat: userLat, lon: userLon, position: userPosition };
+
+
+                // 지도 중심을 현위치로 이동
+                map.setCenter(userPosition);
+                map.setZoom(14);
+
+                // 현위치 마커 추가
+                userMarker = new naver.maps.Marker({
+                    map: map,
+                    position: userPosition,
+                    icon: {
+                        content: `<div style="background:#4299E1;color:white;padding:6px 10px;border-radius:12px;font-weight:bold;box-shadow:0 2px 6px rgba(0,0,0,0.3);">📍 현재 위치</div>`,
+                        anchor: new naver.maps.Point(50, 60)
+                    }
+                });
+
+                // 현위치 정보창
+                const userInfoWindow = new naver.maps.InfoWindow({
+                    content: `
+                        <div style="padding:15px;min-width:200px;">
+                            <div style="font-weight:bold;color:#1f2937;margin-bottom:8px;">📍 현재 위치</div>
+                            <div style="color:#6b7280;font-size:13px;">
+                                위도: ${userLat.toFixed(6)}<br>
+                                경도: ${userLon.toFixed(6)}
+                            </div>
+                        </div>
+                    `
+                });
+
+                // 마커 클릭 시 정보창 열기
+                naver.maps.Event.addListener(userMarker, "click", () => {
+                    closeAllInfoWindows();
+                    userInfoWindow.open(map, userMarker);
+                    openInfoWindows.push(userInfoWindow);
+                });
+
+                console.log('현위치 표시 완료:', userLat, userLon);
+            },
+            // 실패 시 (권한 거부, 시간 초과 등)
+            (error) => {
+                console.warn('현위치 가져오기 실패:', error.message);
+                // 실패해도 기본 지도는 표시됨
+            },
+            // 옵션
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 300000 // 5분간 캐시 사용
+            }
+        );
+    } else {
+        console.warn('브라우저에서 위치 정보를 지원하지 않습니다.');
+    }
+}
+
+/* ───────────────────────────────────────────────────────────── */
+/* 현위치 기반 대피소 검색 함수 (정보창 버튼용)                     */
+/* ───────────────────────────────────────────────────────────── */
+async function searchNearestShelters(lat, lon) {
+    addMessage("user", "📍 현재 위치에서 주변 대피소 검색");
+    addMessage("bot", "🔍 주변 대피소를 탐색 중입니다...");
+    
+    setControlsDisabled(true);
+    
+    const shelters = await searchSheltersByCoordinates(lat, lon);
+    
+    if (!shelters || shelters.length === 0) {
+        addMessage("bot", "❌ 주변에 대피소가 없습니다.");
+        setControlsDisabled(false);
+        return;
+    }
+    
+    // 거리 계산 및 정렬
+    shelters.forEach(s => s.distance = haversine(lat, lon, s.lat, s.lon));
+    shelters.sort((a, b) => a.distance - b.distance);
+    
+    displayShelterResultsCurrent("현재 위치", [lat, lon], shelters);
+}
+
 
 /* ───────────────────────────────────────────────────────────── */
 /* 초기 실행                                                     */
 /* ───────────────────────────────────────────────────────────── */
 document.addEventListener("DOMContentLoaded", async () => {
     await checkApiStatus();
+
+    // 지도 초기화 (현위치 포함)
+    initializeMap();
 
     if (API_AVAILABLE) {
         initialMessageEl.innerHTML =

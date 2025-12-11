@@ -328,17 +328,48 @@ def create_langgraph_app(vectorstore):
                     "structured_data": None
                 }
             
-            # 하이브리드 검색
+            # 1단계: VectorDB 전체에서 매칭되는 대피소 찾기 (전체 개수 카운트용)
+            all_data = vectorstore.get(where={"type": "shelter"})
+            all_shelters = []
+            
+            # 검색 키워드 추출 (공백으로 분리)
+            search_keywords = rewritten.lower().split()
+            
+            for metadata in all_data['metadatas']:
+                # 시설명, 주소, 위치유형에서 키워드 검색
+                facility_name = metadata.get('facility_name', '').lower()
+                address = metadata.get('address', '').lower()
+                shelter_type = metadata.get('shelter_type', '').lower()
+                
+                # 검색 대상 텍스트 결합
+                search_text = f"{facility_name} {address} {shelter_type}"
+                
+                # 모든 키워드 중 하나라도 포함되면 매칭
+                if any(keyword in search_text for keyword in search_keywords):
+                    all_shelters.append({
+                        'name': metadata.get('facility_name', 'N/A'),
+                        'address': metadata.get('address', 'N/A'),
+                        'lat': float(metadata.get('lat', 0)),
+                        'lon': float(metadata.get('lon', 0)),
+                        'distance': 0,
+                        'capacity': int(metadata.get('capacity', 0)),
+                        'shelter_type': metadata.get('shelter_type', 'N/A'),
+                        'facility_type': metadata.get('facility_type', 'N/A')
+                    })
+            
+            total_count = len(all_shelters)
+            
+            # 2단계: 하이브리드 검색으로 상위 결과 추출 (지도 표시용)
             results = shelter_hybrid.invoke(rewritten)
             
             # 중복 제거 및 대피소 정보 수집
             seen = set()
-            shelters = []
+            top_shelters = []
             for doc in results:
                 name = doc.metadata.get('facility_name', '')
                 if name and name not in seen:
                     seen.add(name)
-                    shelters.append({
+                    top_shelters.append({
                         'name': name,
                         'address': doc.metadata.get('address', 'N/A'),
                         'lat': float(doc.metadata.get('lat', 0)),
@@ -348,31 +379,36 @@ def create_langgraph_app(vectorstore):
                         'shelter_type': doc.metadata.get('shelter_type', 'N/A'),
                         'facility_type': doc.metadata.get('facility_type', 'N/A')
                     })
+                    if len(top_shelters) >= 10:  # 최대 10개
+                        break
             
-            if len(shelters) == 0:
+            if total_count == 0:
                 return {
                     "text": f"'{query}' 조건에 맞는 대피소를 찾을 수 없습니다.",
                     "structured_data": None
                 }
             
             # 중심 좌표 계산 (평균)
-            avg_lat = sum(s['lat'] for s in shelters if s['lat'] != 0) / len([s for s in shelters if s['lat'] != 0]) if any(s['lat'] != 0 for s in shelters) else 0
-            avg_lon = sum(s['lon'] for s in shelters if s['lon'] != 0) / len([s for s in shelters if s['lon'] != 0]) if any(s['lon'] != 0 for s in shelters) else 0
+            display_shelters = top_shelters if top_shelters else all_shelters[:10]
+            avg_lat = sum(s['lat'] for s in display_shelters if s['lat'] != 0) / len([s for s in display_shelters if s['lat'] != 0]) if any(s['lat'] != 0 for s in display_shelters) else 0
+            avg_lon = sum(s['lon'] for s in display_shelters if s['lon'] != 0) / len([s for s in display_shelters if s['lon'] != 0]) if any(s['lon'] != 0 for s in display_shelters) else 0
             
             structured_data = {
                 "location": query,
                 "coordinates": (avg_lat, avg_lon) if avg_lat != 0 else None,
-                "shelters": shelters[:10],  # 최대 10개만
-                "total_count": len(shelters)
+                "shelters": display_shelters,  # 지도에 표시할 10개
+                "total_count": total_count  # VectorDB 전체 매칭 개수
             }
             
             return {
-                "text": f"**'{query}'** 조건에 맞는 대피소는 총 **{len(shelters)}개**입니다.",
+                "text": f"**'{query}'** 조건에 맞는 대피소는 총 **{total_count}개**입니다. 📊",
                 "structured_data": structured_data
             }
             
         except Exception as e:
             print(f"[ERROR] count_shelters: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 "text": f"검색 중 오류 발생: {str(e)}",
                 "structured_data": None
