@@ -56,9 +56,14 @@
 
         <!-- control panel -->
         <div id="control-panel" class="flex-shrink-0 p-4 bg-gray-50 border-t border-gray-300 flex flex-col gap-3 shadow-md">
-            <button id="geo-btn" onclick="handleGeolocation()"
-                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl disabled-control"
-                disabled>📍 현위치로 찾기 (GPS)</button>
+            <div class="flex gap-2">
+                <button id="geo-btn" onclick="handleGeolocation()"
+                    class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl disabled-control"
+                    disabled>📍 현위치로 찾기 (GPS)</button>
+                <button id="clear-btn" onclick="clearChatWindow()"
+                    class="bg-gray-600 hover:bg-gray-700 text-white font-bold px-4 py-3 rounded-xl"
+                    title="채팅 기록 지우기">🗑️</button>
+            </div>
 
             <div class="flex gap-2">
                 <input id="chat-input"
@@ -142,6 +147,16 @@ function hidePanorama() {
         if (placeholder) placeholder.style.display = 'flex';
         console.log('🗺️ 파노라마 숨김 (지도 전체)');
     }
+}
+
+// 채팅창 클리어
+function clearChatWindow() {
+    // 초기 메시지 제외하고 모든 메시지 삭제
+    while (chatWindow.children.length > 1) {
+        chatWindow.removeChild(chatWindow.lastChild);
+    }
+    hidePanorama();
+    console.log('💬 채팅창 클리어 완료');
 }
 
 
