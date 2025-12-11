@@ -418,32 +418,86 @@ def create_langgraph_app(vectorstore):
     def search_shelter_by_capacity(query: str) -> dict:
         """
         수용인원 기준으로 대피소를 검색합니다.
-        지도 표시용 구조화된 데이터를 포함합니다.
+        위치 조건이 있으면 해당 지역 내에서만 검색합니다.
+        "이상"과 "이하"를 구분하여 필터링합니다.
         
         Args:
-            query: 수용인원 조건 (예: "천 명 이상", "100명 수용 가능")
+            query: 수용인원 조건 (예: "천 명 이상", "300명 이하", "서울 동작구 천명 이상")
         
         Returns:
             dict: {"text": str, "structured_data": dict} 형식
         """
         try:
-            # 숫자 추출
-            numbers = re.findall(r'\d+', query)
-            if not numbers:
+            # 1단계: "이상" vs "이하" 판단
+            is_minimum = True  # 기본값: 이상
+            if '이하' in query:
+                is_minimum = False
+            
+            # 2단계: 숫자 단위 먼저 처리 (천, 만)
+            capacity_value = 0
+            
+            # "천명", "천 명", "1천명" 등 처리
+            if '천' in query or '1000' in query:
+                # 천 앞의 숫자 찾기
+                thousand_pattern = re.search(r'(\d+)\s*천', query)
+                if thousand_pattern:
+                    capacity_value = int(thousand_pattern.group(1)) * 1000
+                else:
+                    capacity_value = 1000  # 숫자 없이 "천명"만 있는 경우
+            elif '만' in query or '10000' in query:
+                # 만 앞의 숫자 찾기
+                ten_thousand_pattern = re.search(r'(\d+)\s*만', query)
+                if ten_thousand_pattern:
+                    capacity_value = int(ten_thousand_pattern.group(1)) * 10000
+                else:
+                    capacity_value = 10000  # 숫자 없이 "만명"만 있는 경우
+            else:
+                # 일반 숫자 추출
+                numbers = re.findall(r'\d+', query)
+                if numbers:
+                    capacity_value = int(numbers[0])
+            
+            if capacity_value == 0:
                 return {
-                    "text": "수용인원을 명확히 입력해주세요. (예: 1000명 이상)",
+                    "text": "수용인원을 명확히 입력해주세요. (예: 1000명 이상, 천명 이상)",
                     "structured_data": None
                 }
             
-            min_capacity = int(numbers[0])
+            # 2단계: 위치 키워드 추출
+            location_query = query
             
-            # 숫자 단위 처리 (천, 만)
-            if '천' in query:
-                min_capacity *= 1000
-            elif '만' in query:
-                min_capacity *= 10000
+            # 수용인원 관련 부분 완전 제거
+            remove_patterns = [
+                r'\d+\s*천\s*명?\s*(이상|이하)?',  # "1천명 이상", "천명"
+                r'\d+\s*만\s*명?\s*(이상|이하)?',  # "1만명 이상", "만명"
+                r'\d+\s*명\s*(이상|이하)?',        # "53600명 이상", "1000명"
+                r'천\s*명?\s*(이상|이하)?',        # "천명 이상"
+                r'만\s*명?\s*(이상|이하)?',        # "만명 이상"
+                r'수용\s*인원\s*(이|가)?',         # "수용인원이", "수용인원"
+                r'수용\s*할?\s*수\s*있는',         # "수용할 수 있는"
+                r'수용\s*가능한?',                # "수용가능한"
+                r'최대\s*수용',                   # "최대수용"
+                r'인원\s*(이|가|을|를)?',         # "인원이", "인원을"
+                r'대피소\s*(를|을|이|가)?',       # "대피소를", "대피소"
+                r'찾아\s*줘?',
+                r'알려\s*줘?',
+                r'있어\??',
+                r'있니\??',
+                r'있나요\??',
+            ]
             
-            print(f"[search_shelter_by_capacity] 최소 수용인원: {min_capacity}명")
+            for pattern in remove_patterns:
+                location_query = re.sub(pattern, ' ', location_query, flags=re.IGNORECASE)
+            
+            # "에서", "의" 등 조사 제거
+            location_query = re.sub(r'\s*(에서|에|의|에서의)\s*', ' ', location_query)
+            
+            # 공백 정리
+            location_query = ' '.join(location_query.split()).strip()
+            
+            condition_text = "이상" if is_minimum else "이하"
+            print(f"[search_shelter_by_capacity] 수용인원: {capacity_value}명 {condition_text}")
+            print(f"[search_shelter_by_capacity] 위치 필터: '{location_query}'")
             
             # 모든 대피소 가져오기
             all_data = vectorstore.get(where={"type": "shelter"})
@@ -451,39 +505,65 @@ def create_langgraph_app(vectorstore):
             
             for metadata in all_data['metadatas']:
                 capacity = int(metadata.get('capacity', 0))
-                if capacity >= min_capacity:
-                    shelters.append({
-                        'name': metadata.get('facility_name', 'N/A'),
-                        'address': metadata.get('address', 'N/A'),
-                        'lat': float(metadata.get('lat', 0)),
-                        'lon': float(metadata.get('lon', 0)),
-                        'capacity': capacity,
-                        'shelter_type': metadata.get('shelter_type', 'N/A'),
-                        'distance': 0  # 수용인원 검색은 거리 정보 없음
-                    })
+                
+                # 수용인원 조건 체크 (이상 vs 이하)
+                if is_minimum:
+                    if capacity < capacity_value:
+                        continue
+                else:
+                    if capacity > capacity_value:
+                        continue
+                
+                # 위치 조건 체크 (위치 키워드가 있으면)
+                if location_query:
+                    facility_name = metadata.get('facility_name', '').lower()
+                    address = metadata.get('address', '').lower()
+                    shelter_type = metadata.get('shelter_type', '').lower()
+                    
+                    # 시설명, 주소, 위치유형에서 위치 키워드 검색
+                    search_text = f"{facility_name} {address} {shelter_type}"
+                    
+                    # 위치 키워드의 모든 부분이 포함되어야 매칭
+                    location_keywords = location_query.split()
+                    if not all(keyword in search_text for keyword in location_keywords if keyword):
+                        continue
+                
+                shelters.append({
+                    'name': metadata.get('facility_name', 'N/A'),
+                    'address': metadata.get('address', 'N/A'),
+                    'lat': float(metadata.get('lat', 0)),
+                    'lon': float(metadata.get('lon', 0)),
+                    'capacity': capacity,
+                    'shelter_type': metadata.get('shelter_type', 'N/A'),
+                    'distance': 0  # 수용인원 검색은 거리 정보 없음
+                })
             
             # 수용인원 내림차순 정렬
             shelters.sort(key=lambda x: x['capacity'], reverse=True)
             top_10 = shelters[:10]
             
             if not top_10:
+                location_text = f"'{location_query}' 지역에서 " if location_query else ""
+                condition_text = "이상" if is_minimum else "이하"
                 return {
-                    "text": f"{min_capacity:,}명 이상 수용 가능한 대피소를 찾을 수 없습니다.",
+                    "text": f"{location_text}{capacity_value:,}명 {condition_text} 수용 가능한 대피소를 찾을 수 없습니다.",
                     "structured_data": None
                 }
             
-            result = f"📊 **{min_capacity:,}명 이상** 수용 가능한 대피소 **{len(shelters)}곳** 중 상위 10곳\n\n"
+            location_text = f"**{location_query}** 지역 " if location_query else ""
+            condition_text = "이상" if is_minimum else "이하"
+            result = f"📊 {location_text}**{capacity_value:,}명 {condition_text}** 수용 가능한 대피소 **{len(shelters)}곳** 중 상위 10곳\n\n"
             for i, s in enumerate(top_10, 1):
                 result += f"{i}. **{s['name']}** ({s['capacity']:,}명)\n"
                 result += f"   📍 {s['address']}\n"
                 result += f"   📍 위치: {s['shelter_type']}\n\n"
             
             # 중심 좌표 계산 (평균)
-            avg_lat = sum(s['lat'] for s in shelters if s['lat'] != 0) / len([s for s in shelters if s['lat'] != 0]) if any(s['lat'] != 0 for s in shelters) else 0
-            avg_lon = sum(s['lon'] for s in shelters if s['lon'] != 0) / len([s for s in shelters if s['lon'] != 0]) if any(s['lon'] != 0 for s in shelters) else 0
+            avg_lat = sum(s['lat'] for s in top_10 if s['lat'] != 0) / len([s for s in top_10 if s['lat'] != 0]) if any(s['lat'] != 0 for s in top_10) else 0
+            avg_lon = sum(s['lon'] for s in top_10 if s['lon'] != 0) / len([s for s in top_10 if s['lon'] != 0]) if any(s['lon'] != 0 for s in top_10) else 0
             
             structured_data = {
-                "location": f"{min_capacity:,}명 이상 수용 가능",
+                "location": f"{location_query} {capacity_value:,}명 {condition_text}" if location_query else f"{capacity_value:,}명 {condition_text} 수용 가능",
                 "coordinates": (avg_lat, avg_lon) if avg_lat != 0 else None,
                 "shelters": top_10,
                 "total_count": len(shelters)
@@ -496,6 +576,8 @@ def create_langgraph_app(vectorstore):
             
         except Exception as e:
             print(f"[ERROR] search_shelter_by_capacity: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 "text": f"검색 중 오류 발생: {str(e)}",
                 "structured_data": None
@@ -591,43 +673,120 @@ def create_langgraph_app(vectorstore):
     def search_shelter_by_name(query: str) -> dict:
         """
         특정 대피소의 상세 정보를 시설명으로 검색합니다.
+        위치 조건이 있으면 해당 지역 내에서만 검색합니다.
         수용인원, 주소, 위치 등 해당 시설의 모든 정보를 반환합니다.
         지도 표시용 구조화된 데이터를 포함합니다.
         
         Args:
-            query: 대피소 시설명 (예: "동대문맨션", "서울역", "롯데월드")
+            query: 대피소 시설명 (예: "동대문맨션", "제주도 동아아파트", "서울 롯데월드")
         
         Returns:
             dict: {"text": str, "structured_data": dict} 형식
         
         Examples:
             - "동대문맨션 수용인원" → search_shelter_by_name("동대문맨션")
-            - "서울역 대피소 정보" → search_shelter_by_name("서울역")
+            - "제주도 동아아파트 정보" → search_shelter_by_name("제주도 동아아파트")
         """
         try:
             print(f"[search_shelter_by_name] 검색 시작: '{query}'")
             
+            # 1단계: 위치와 시설명 분리
+            original_query = query.strip().lower()
+            
+            # 지역 키워드 리스트 (시/도/구 단위)
+            location_keywords = [
+                # 제주 관련 (길이순 정렬 - 긴 것부터)
+                '제주특별자치도', '제주도', '제주시', '서귀포시', '제주',
+                # 광역시/도
+                '서울특별시', '서울', 
+                '부산광역시', '부산',
+                '대구광역시', '대구',
+                '인천광역시', '인천',
+                '광주광역시', '광주',
+                '대전광역시', '대전',
+                '울산광역시', '울산',
+                '세종특별자치시', '세종',
+                '경기도', '경기',
+                '강원도', '강원특별자치도', '강원',
+                '충청북도', '충북',
+                '충청남도', '충남',
+                '전라북도', '전북',
+                '전라남도', '전남',
+                '경상북도', '경북',
+                '경상남도', '경남',
+                # 서울 구
+                '강남구', '강동구', '강북구', '강서구', '관악구', '광진구', '구로구', '금천구',
+                '노원구', '도봉구', '동대문구', '동작구', '마포구', '서대문구', '서초구', '성동구',
+                '성북구', '송파구', '양천구', '영등포구', '용산구', '은평구', '종로구', '중구', '중랑구'
+            ]
+            
+            # 위치 키워드 추출 (긴 것부터 매칭 - 이미 정렬됨)
+            location_filter = None
+            for loc in location_keywords:
+                if loc in original_query:
+                    location_filter = loc
+                    print(f"[DEBUG] 위치 키워드 '{loc}' 매칭됨")
+                    break
+            
+            print(f"[DEBUG] 최종 location_filter: '{location_filter}'")
+            
+            # 2단계: 검색어 정제 (불필요한 단어 제거)
+            search_term = original_query
+            
+            # 위치 키워드 먼저 제거 (시설명만 남김)
+            if location_filter:
+                search_term = search_term.replace(location_filter, ' ')
+            
+            # 불필요한 단어 제거
+            remove_words = ["대피소", "수용인원", "최대수용인원", "몇명", "정보", 
+                        "알려줘", "알려", "의", "이", "가", "은", "는", "?", "!", "를", "을",
+                        "도", "시", "군", "구"]  # 행정구역 단위도 제거
+            
+            for word in remove_words:
+                search_term = search_term.replace(word, " ")
+            
+            search_term = ' '.join(search_term.split()).strip().lower()  # 소문자 변환 추가
+            
+            print(f"[search_shelter_by_name] 정제된 검색어: '{search_term}'")
+            print(f"[search_shelter_by_name] 위치 필터: '{location_filter}'")
+            
             # VectorStore에서 shelter 타입 문서 가져오기
             all_data = vectorstore.get(where={"type": "shelter"})
             
-            # 검색어 정제 (불필요한 단어 제거)
-            search_term = query.strip().lower()
-            remove_words = ["대피소", "수용인원", "최대수용인원", "몇명", "정보", 
-                        "알려줘", "의", "이", "가", "은", "는", "?", "!", " "]
-            for word in remove_words:
-                search_term = search_term.replace(word, "")
-            search_term = search_term.strip()
-            
-            print(f"[search_shelter_by_name] 정제된 검색어: '{search_term}'")
-            
-            # 시설명 매칭 (부분 일치)
+            # 3단계: 시설명 매칭 (부분 일치)
             matches = []
+            match_attempt = 0
             for metadata in all_data['metadatas']:
                 facility_name = metadata.get('facility_name', '')
                 facility_lower = facility_name.lower()
+                address = metadata.get('address', '').lower()
                 
-                # 양방향 부분 일치
+                # 시설명 매칭 (양방향 부분 일치)
                 if search_term in facility_lower or facility_lower in search_term:
+                    match_attempt += 1
+                    
+                    # 위치 필터가 있으면 주소도 체크
+                    if location_filter:
+                        filter_lower = location_filter.lower()
+                        
+                        # 유연한 위치 매칭 - 행정구역 단위 제거 (긴 것부터 순서대로)
+                        filter_core = (filter_lower
+                                     .replace('특별자치도', '')  # '제주특별자치도' → '제주'
+                                     .replace('특별자치시', '')  # '세종특별자치시' → '세종'
+                                     .replace('특별시', '')      # '서울특별시' → '서울'
+                                     .replace('광역시', '')      # '부산광역시' → '부산'
+                                     .replace('도', '')          # '경기도' → '경기', '제주도' → '제주'
+                                     .replace('시', '')
+                                     .replace('군', '')
+                                     .replace('구', '')
+                                     .strip())
+                        
+                        if match_attempt <= 3:
+                            print(f"[DEBUG] 시설명 매칭: '{facility_name}', 주소: '{address[:30]}...', filter_lower: '{filter_lower}', filter_core: '{filter_core}', 포함여부: {filter_core in address}")
+                        
+                        if filter_core not in address:
+                            continue
+                    
                     matches.append({
                         'name': facility_name,
                         'address': metadata.get('address', 'N/A'),
@@ -639,11 +798,14 @@ def create_langgraph_app(vectorstore):
                         'operating_status': metadata.get('operating_status', 'N/A'),
                         'distance': 0  # 시설명 검색은 거리 정보 없음
                     })
-                    print(f"[search_shelter_by_name] 매칭됨: {facility_name}")
+                    print(f"[search_shelter_by_name] 매칭됨: {facility_name} ({metadata.get('address', 'N/A')})")
+            
+            print(f"[DEBUG] 총 매칭된 대피소 개수: {len(matches)}")
             
             if not matches:
+                location_text = f"{location_filter} " if location_filter else ""
                 return {
-                    "text": f"❌ '{query}' 시설을 찾을 수 없습니다.\n시설명을 정확히 입력해주세요.",
+                    "text": f"❌ '{location_text}{search_term}' 시설을 찾을 수 없습니다.\n시설명을 정확히 입력해주세요.",
                     "structured_data": None
                 }
             
@@ -673,6 +835,7 @@ def create_langgraph_app(vectorstore):
             
             else:
                 # 여러 개 발견 시
+                print(f"[DEBUG] 여러 개 발견 분기 진입: {len(matches)}개")
                 text = f"📍 **'{search_term}'** 관련 대피소 **{len(matches)}곳** 발견\n\n"
                 for i, m in enumerate(matches[:5], 1):  # 상위 5개만
                     text += f"{i}. **{m['name']}**\n"
@@ -1033,17 +1196,21 @@ def create_langgraph_app(vectorstore):
                         import json
                         parsed = json.loads(content)
                         if isinstance(parsed, dict) and "structured_data" in parsed:
-                            structured_data = parsed["structured_data"]
+                            # None이 아닌 structured_data를 우선적으로 사용
+                            if parsed["structured_data"] is not None:
+                                structured_data = parsed["structured_data"]
+                                print(f"[tools_node] structured_data 추출 완료 (JSON): True")
                             message.content = parsed.get("text", content)
-                            print(f"[tools_node] structured_data 추출 완료 (JSON): {structured_data is not None}")
                     except (json.JSONDecodeError, TypeError):
                         pass
                 
                 # content가 dict인 경우 직접 처리
                 elif isinstance(content, dict) and "structured_data" in content:
-                    structured_data = content["structured_data"]
+                    # None이 아닌 structured_data를 우선적으로 사용
+                    if content["structured_data"] is not None:
+                        structured_data = content["structured_data"]
+                        print(f"[tools_node] structured_data 추출 완료 (dict): True")
                     message.content = content.get("text", str(content))
-                    print(f"[tools_node] structured_data 추출 완료 (dict): {structured_data is not None}")
         
         return {
             "messages": messages,
