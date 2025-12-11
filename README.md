@@ -705,13 +705,6 @@ python generate_ssl_cert.py
 |--------|-----------|
 | 민방위 대피시설 · 재난 행동요령 실시간 질의응답 챗봇 | 🔗 **https://61.78.100.233:8443/** |
 
-> ⚠ 접속 시 브라우저에서 **보안 인증서 경고(Your connection is not private / NET::ERR_CERT)** 문구가 노출될 수 있습니다.  
-> 이는 **자가 서명 인증서(Self-signed cert)** 사용으로 인한 것이며 악성 사이트가 아닙니다.
-
-### 📌 접속 방법  
-Chrome → "고급(Advanced)" → "사이트로 이동(Proceed)" 클릭
-
----
 
 ## 🎯 제공 기능
 
