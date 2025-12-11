@@ -270,7 +270,7 @@ function handleGeolocation() {
         setControlsDisabled(false);
         return;
     }
-
+    hidePanorama();
     navigator.geolocation.getCurrentPosition(onSuccessGeolocation, onErrorGeolocation);
 }
 
