@@ -24,7 +24,7 @@
 
 <div class="w-full max-w-6xl bg-white shadow-2xl rounded-2xl overflow-hidden grid md:grid-cols-2">
 
-    <!-- left : map -->
+    <!-- left : map + panorama -->
     <div class="flex flex-col bg-gray-200 h-[250px] md:h-[85vh]">
         <header class="flex-shrink-0 p-4 bg-red-600 text-white flex justify-between items-center shadow-md">
             <div>
@@ -33,7 +33,14 @@
             </div>
             <div id="llm-status" class="llm-badge llm-off">LLM OFF</div>
         </header>
-        <div id="map" class="w-full flex-grow"></div>
+        <!-- 상단: 지도 (50%) -->
+        <div id="map" class="w-full" style="height: 50%;"></div>
+        <!-- 하단: 파노라마 (50%) -->
+        <div id="pano" class="w-full bg-gray-800 relative" style="height: 50%;">
+            <div id="pano-placeholder" class="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">
+                📷 지도를 클릭하면 파노라마가 표시됩니다
+            </div>
+        </div>
     </div>
 
     <!-- right : chat -->
@@ -100,6 +107,7 @@ let userMarker = null;
 let shelterMarkers = [];
 let openInfoWindows = [];
 let currentUserPosition = null;  // 현위치 저장용
+let panorama = null;  // 파노라마 객체
 
 const chatWindow = document.getElementById('chat-window');
 const chatInput = document.getElementById('chat-input');
@@ -387,7 +395,23 @@ function resetMapToCurrentLocation() {
             closeAllInfoWindows();
             userInfoWindow.open(map, userMarker);
             openInfoWindows.push(userInfoWindow);
+            
+            // 현위치 파노라마 표시
+            if (panorama) {
+                panorama.setPosition(currentUserPosition.position);
+                panorama.setVisible(true);
+                const placeholder = document.getElementById('pano-placeholder');
+                if (placeholder) placeholder.style.display = 'none';
+            }
         });
+    }
+    
+    // 현위치 파노라마로 업데이트
+    if (panorama) {
+        panorama.setPosition(currentUserPosition.position);
+        panorama.setVisible(true);
+        const placeholder = document.getElementById('pano-placeholder');
+        if (placeholder) placeholder.style.display = 'none';
     }
     
     console.log('지도를 현위치로 리셋:', currentUserPosition.lat, currentUserPosition.lon);
@@ -463,6 +487,14 @@ function showMapWithMultipleShelters(centerLat, centerLon, shelters, locationNam
             closeAllInfoWindows();
             iw.open(map, marker);
             openInfoWindows.push(iw);
+            
+            // 마커 위치의 파노라마 표시
+            if (panorama) {
+                panorama.setPosition(p);
+                panorama.setVisible(true);
+                const placeholder = document.getElementById('pano-placeholder');
+                if (placeholder) placeholder.style.display = 'none';
+            }
         });
 
         shelterMarkers.push(marker);
@@ -491,8 +523,39 @@ function initializeMap() {
         maxZoom: 18
     });
 
-    // 지도 클릭 시 정보창 닫기
-    naver.maps.Event.addListener(map, "click", closeAllInfoWindows);
+    // 파노라마 초기화
+    try {
+        panorama = new naver.maps.Panorama("pano", {
+            position: defaultCenter,
+            pov: {
+                pan: 0,
+                tilt: 0,
+                fov: 100
+            },
+            visible: false  // 초기에는 숨김
+        });
+        console.log('파노라마 초기화 완료');
+    } catch (e) {
+        console.warn('파노라마 초기화 실패:', e);
+    }
+
+    // 지도 클릭 시 정보창 닫기 + 파노라마 업데이트
+    naver.maps.Event.addListener(map, "click", function(e) {
+        closeAllInfoWindows();
+        
+        // 클릭 위치의 파노라마 표시
+        if (panorama) {
+            const clickedPos = e.coord;
+            panorama.setPosition(clickedPos);
+            panorama.setVisible(true);
+            
+            // placeholder 숨기기
+            const placeholder = document.getElementById('pano-placeholder');
+            if (placeholder) placeholder.style.display = 'none';
+            
+            console.log('파노라마 위치 업데이트:', clickedPos.toString());
+        }
+    });
 
     // 현위치 자동 표시 시도
     if (navigator.geolocation) {
@@ -534,11 +597,19 @@ function initializeMap() {
                     `
                 });
 
-                // 마커 클릭 시 정보창 열기
+                // 마커 클릭 시 정보창 열기 + 파노라마
                 naver.maps.Event.addListener(userMarker, "click", () => {
                     closeAllInfoWindows();
                     userInfoWindow.open(map, userMarker);
                     openInfoWindows.push(userInfoWindow);
+                    
+                    // 현위치 파노라마 표시
+                    if (panorama) {
+                        panorama.setPosition(userPosition);
+                        panorama.setVisible(true);
+                        const placeholder = document.getElementById('pano-placeholder');
+                        if (placeholder) placeholder.style.display = 'none';
+                    }
                 });
 
                 console.log('현위치 표시 완료:', userLat, userLon);
