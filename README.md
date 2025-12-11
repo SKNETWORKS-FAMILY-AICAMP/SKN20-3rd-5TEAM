@@ -170,15 +170,15 @@ python from_DataLoad_to_VectorDB.py
 [원본 데이터]
 ├── shelter.csv (DataFrame)
 │   └── csv_to_documents()
-│       └── List[Document(page_content, metadata)]
+│       └── List[Document(page_content, metadata)] ---- ['shelter' Documents]
 │
 └── *.json (dict)
     └── json_to_documents()
-        └── List[Document(page_content, metadata)]
+        └── List[Document(page_content, metadata)] ---- ['guidline' Documents]
 
 ↓ (통합)
 
-[All Documents] → List[Document]
+['shelter' Documents] + ['guidline' Documents] → [All Documents]
 
 ↓ (임베딩)
 
