@@ -40,6 +40,12 @@
             <div id="pano-placeholder" class="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">
                 📷 지도를 클릭하면 파노라마가 표시됩니다
             </div>
+            <!-- 파노라마 닫기 버튼 -->
+            <button id="pano-close-btn" onclick="hidePanorama()" 
+                class="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white font-bold px-3 py-2 rounded-lg shadow-lg z-50 hidden transition-all"
+                title="파노라마 닫기">
+                ✕ 닫기
+            </button>
         </div>
     </div>
 
@@ -125,11 +131,13 @@ function showPanorama() {
     const mapDiv = document.getElementById('map');
     const panoDiv = document.getElementById('pano');
     const placeholder = document.getElementById('pano-placeholder');
+    const closeBtn = document.getElementById('pano-close-btn');
     
     if (mapDiv && panoDiv) {
         mapDiv.style.height = '50%';
         panoDiv.style.height = '50%';
         if (placeholder) placeholder.style.display = 'none';
+        if (closeBtn) closeBtn.classList.remove('hidden');
         console.log('📷 파노라마 표시');
     }
 }
@@ -139,12 +147,14 @@ function hidePanorama() {
     const mapDiv = document.getElementById('map');
     const panoDiv = document.getElementById('pano');
     const placeholder = document.getElementById('pano-placeholder');
+    const closeBtn = document.getElementById('pano-close-btn');
     
     if (mapDiv && panoDiv) {
         mapDiv.style.height = '100%';
         panoDiv.style.height = '0%';
         if (panorama) panorama.setVisible(false);
         if (placeholder) placeholder.style.display = 'flex';
+        if (closeBtn) closeBtn.classList.add('hidden');
         console.log('🗺️ 파노라마 숨김 (지도 전체)');
     }
 }
