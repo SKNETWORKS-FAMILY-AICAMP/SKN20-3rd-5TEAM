@@ -193,7 +193,7 @@ python from_DataLoad_to_VectorDB.py
 
 ### 3️⃣ FastAPI 서버 실행
 
-#### 📄 `main.py` (얼굴/운전석 - API 서버 및 요청 처리)
+#### 📄 `main.py` (API 서버 및 요청 처리)
 
 **목적:** 사용자 요청을 받아 LangGraph Agent에 전달하고 결과를 반환하는 FastAPI 서버
 
@@ -234,7 +234,7 @@ python main.py
 
 ---
 
-#### 📄 `langgraph_agent.py` (두뇌/엔진 - Agent 로직 및 도구 정의)
+#### 📄 `langgraph_agent.py` (Agent 로직 및 도구 정의)
 
 **목적:** 순수하게 "생각하는 로직"만 담당 - 의도 분류, 질문 재정의, 도구 선택 및 실행
 
