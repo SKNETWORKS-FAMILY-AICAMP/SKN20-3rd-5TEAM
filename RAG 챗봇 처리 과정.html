@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG 챗봇 처리 과정 플로우차트</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+        }
+        
+        .step-card {
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .step-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        
+        .step-details {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease;
+        }
+        
+        .step-details.active {
+            max-height: 3000px;
+        }
+        
+        .arrow {
+            width: 0;
+            height: 0;
+            border-left: 20px solid transparent;
+            border-right: 20px solid transparent;
+            border-top: 30px solid #e5e7eb;
+            margin: 0 auto;
+            animation: bounce 2s infinite;
+        }
+        
+        @keyframes bounce {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-10px);
+            }
+        }
+        
+        .code-block {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .timeline-dot {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: white;
+            border: 4px solid;
+            position: absolute;
+            left: -8px;
+            top: 8px;
+        }
+        
+        .sub-step {
+            position: relative;
+            padding-left: 2rem;
+            border-left: 2px solid #e5e7eb;
+            margin-left: 1rem;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen py-8 px-4">
+    <div class="max-w-5xl mx-auto">
+        <!-- Header -->
+        <div class="text-center mb-12">
+            <h1 class="text-4xl font-bold text-gray-800 mb-4">
+                🤖 RAG 챗봇 처리 과정
+            </h1>
+            <p class="text-lg text-gray-600 mb-2">
+                복합 질문 처리 플로우차트
+            </p>
+            <div class="bg-white rounded-lg p-4 shadow-md inline-block">
+                <p class="text-sm text-gray-700 font-medium mb-2">💬 예시 질문:</p>
+                <p class="text-gray-800 italic">
+                    "지금 내가 플레이데이터 서초캠퍼스에 있는데 땅이 흔들리고 있어.<br>
+                    지금 내가 어떻게 행동해야하는지 또 어디로 대피해야하는지 알려줘"
+                </p>
+            </div>
+        </div>
+
+        <!-- Step 1: 프론트엔드 -->
+        <div class="step-card bg-white rounded-xl shadow-lg p-6 mb-4" onclick="toggleStep('step1')">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div class="bg-blue-500 text-white w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold">
+                        1
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800">프론트엔드</h2>
+                        <p class="text-gray-600">shelter_1.0.html</p>
+                    </div>
+                </div>
+                <span class="badge bg-blue-100 text-blue-800">HTML/JavaScript</span>
+            </div>
+            
+            <div id="step1" class="step-details mt-4">
+                <div class="bg-gray-50 rounded-lg p-4 space-y-3">
+                    <div class="flex items-start space-x-3">
+                        <span class="text-2xl">👤</span>
+                        <div>
+                            <h4 class="font-semibold text-gray-800">사용자 입력</h4>
+                            <p class="text-gray-600 text-sm">웹 인터페이스에서 질문 텍스트 입력</p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-start space-x-3">
+                        <span class="text-2xl">📡</span>
+                        <div>
+                            <h4 class="font-semibold text-gray-800">API 호출</h4>
+                            <div class="code-block mt-2">
+fetch('POST /api/location/extract', {
+    method: 'POST',
+    body: JSON.stringify({query: "..."})
+})</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow border-t-blue-300"></div>
+
+        <!-- Step 2: FastAPI 서버 -->
+        <div class="step-card bg-white rounded-xl shadow-lg p-6 mb-4" onclick="toggleStep('step2')">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div class="bg-green-500 text-white w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold">
+                        2
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800">FastAPI 서버</h2>
+                        <p class="text-gray-600">main.py</p>
+                    </div>
+                </div>
+                <span class="badge bg-green-100 text-green-800">Backend</span>
+            </div>
+            
+            <div id="step2" class="step-details mt-4">
+                <div class="bg-gray-50 rounded-lg p-4 space-y-4">
+                    <div class="flex items-start space-x-3">
+                        <span class="text-2xl">🎯</span>
+                        <div>
+                            <h4 class="font-semibold text-gray-800">엔드포인트 실행</h4>
+                            <div class="code-block mt-2">
+@app.post("/api/location/extract")
+async def extract_location(request: LocationExtractRequest)</div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-start space-x-3">
+                        <span class="text-2xl">📦</span>
+                        <div>
+                            <h4 class="font-semibold text-gray-800">Request Body 파싱</h4>
+                            <p class="text-gray-600 text-sm">Pydantic 모델로 데이터 검증</p>
+                            <div class="code-block mt-2">
+LocationExtractRequest(query="플레이데이터 서초캠퍼스...")</div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-start space-x-3">
+                        <span class="text-2xl">🚀</span>
+                        <div>
+                            <h4 class="font-semibold text-gray-800">LangGraph Agent 호출</h4>
+                            <div class="code-block mt-2">
+langgraph_app.invoke({
+    "messages": [HumanMessage(content=query)]
+})</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow border-t-green-300"></div>
+
+        <!-- Step 3: LangGraph Agent -->
+        <div class="step-card bg-white rounded-xl shadow-lg p-6 mb-4" onclick="toggleStep('step3')">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div class="bg-purple-500 text-white w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold">
+                        3
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800">LangGraph Agent</h2>
+                        <p class="text-gray-600">langgraph_agent.py</p>
+                    </div>
+                </div>
+                <span class="badge bg-purple-100 text-purple-800">AI Engine</span>
+            </div>
+            
+            <div id="step3" class="step-details mt-4">
+                <div class="bg-gray-50 rounded-lg p-4 space-y-4">
+                    <!-- Node 1 -->
+                    <div class="border-l-4 border-purple-500 pl-4">
+                        <div class="flex items-center space-x-2 mb-2">
+                            <span class="text-2xl">🧠</span>
+                            <h4 class="font-bold text-gray-800 text-lg">Node 1: 의도 분류</h4>
+                        </div>
+                        <div class="sub-step">
+                            <div class="timeline-dot border-purple-500"></div>
+                            <p class="text-sm text-gray-600 mb-2">질문 분석:</p>
+                            <ul class="text-sm text-gray-700 space-y-1 ml-4">
+                                <li>• "플레이데이터 서초캠퍼스" → 위치 키워드 감지</li>
+                                <li>• "땅이 흔들리고" → 지진 키워드 감지</li>
+                                <li>• "행동" + "대피" → 복합 의도 감지</li>
+                            </ul>
+                            <div class="mt-3 p-3 bg-purple-50 rounded border border-purple-200">
+                                <p class="text-sm font-semibold text-purple-800">
+                                    ✅ 분류 결과: <code class="bg-purple-100 px-2 py-1 rounded">hybrid_location_disaster</code>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Node 2 -->
+                    <div class="border-l-4 border-indigo-500 pl-4">
+                        <div class="flex items-center space-x-2 mb-2">
+                            <span class="text-2xl">🔄</span>
+                            <h4 class="font-bold text-gray-800 text-lg">Node 2: 질문 재정의</h4>
+                        </div>
+                        <div class="sub-step">
+                            <div class="timeline-dot border-indigo-500"></div>
+                            <p class="text-sm text-gray-600 mb-2">BM25 검색 최적화:</p>
+                            <div class="code-block mt-2">
+"플레이데이터 서초캠퍼스 지진 대피소 행동요령"</div>
+                            <p class="text-xs text-gray-500 mt-2">※ 불필요한 조사 제거, 핵심 키워드만 추출</p>
+                        </div>
+                    </div>
+
+                    <!-- Node 3 -->
+                    <div class="border-l-4 border-pink-500 pl-4">
+                        <div class="flex items-center space-x-2 mb-2">
+                            <span class="text-2xl">🤖</span>
+                            <h4 class="font-bold text-gray-800 text-lg">Node 3: 도구 선택</h4>
+                        </div>
+                        <div class="sub-step">
+                            <div class="timeline-dot border-pink-500"></div>
+                            <p class="text-sm text-gray-600 mb-2">LLM이 적절한 도구 선택:</p>
+                            <div class="mt-3 p-3 bg-pink-50 rounded border border-pink-200">
+                                <p class="text-sm font-semibold text-pink-800">
+                                    🛠️ 선택된 도구: <code class="bg-pink-100 px-2 py-1 rounded">search_location_with_disaster()</code>
+                                </p>
+                                <p class="text-xs text-gray-600 mt-1">이유: 위치 + 재난이 함께 있는 복합 질문</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Node 4 -->
+                    <div class="border-l-4 border-orange-500 pl-4">
+                        <div class="flex items-center space-x-2 mb-2">
+                            <span class="text-2xl">🛠️</span>
+                            <h4 class="font-bold text-gray-800 text-lg">Node 4: 도구 실행</h4>
+                        </div>
+                        <div class="sub-step space-y-3">
+                            <div class="timeline-dot border-orange-500"></div>
+                            
+                            <!-- 4-1 -->
+                            <div class="bg-white p-3 rounded border border-gray-200">
+                                <p class="font-semibold text-gray-700 text-sm">4-1. 재난 키워드 추출</p>
+                                <p class="text-xs text-gray-600 mt-1">"땅이 흔들리고" → "지진" 감지</p>
+                            </div>
+
+                            <!-- 4-2 -->
+                            <div class="bg-white p-3 rounded border border-gray-200">
+                                <p class="font-semibold text-gray-700 text-sm">4-2. 위치 키워드 추출</p>
+                                <p class="text-xs text-gray-600 mt-1">location_query = "플레이데이터 서초캠퍼스"</p>
+                            </div>
+
+                            <!-- 4-3 -->
+                            <div class="bg-white p-3 rounded border border-gray-200">
+                                <p class="font-semibold text-gray-700 text-sm">4-3. Kakao Local API 호출</p>
+                                <div class="code-block mt-2 text-xs">
+GET https://dapi.kakao.com/v2/local/search/keyword.json
+
+응답:
+- place_name: "플레이데이터"
+- 위도(y): 37.4979
+- 경도(x): 127.0276</div>
+                            </div>
+
+                            <!-- 4-4 -->
+                            <div class="bg-white p-3 rounded border border-gray-200">
+                                <p class="font-semibold text-gray-700 text-sm">4-4. 대피소 검색 (ChromaDB)</p>
+                                <ul class="text-xs text-gray-600 mt-2 space-y-1">
+                                    <li>• vectorstore.get(where={"type": "shelter"})</li>
+                                    <li>• Haversine 거리 계산</li>
+                                    <li>• 거리순 정렬</li>
+                                </ul>
+                                <div class="mt-2 p-2 bg-blue-50 rounded text-xs">
+                                    <p class="font-semibold text-blue-800">가장 가까운 3곳:</p>
+                                    <p class="text-blue-700">1. 서초구민회관 (0.5km)</p>
+                                    <p class="text-blue-700">2. 강남역지하상가 (1.2km)</p>
+                                    <p class="text-blue-700">3. 교보타워 (1.5km)</p>
+                                </div>
+                            </div>
+
+                            <!-- 4-5 -->
+                            <div class="bg-white p-3 rounded border border-gray-200">
+                                <p class="font-semibold text-gray-700 text-sm">4-5. 재난 행동요령 검색 (Hybrid Retriever)</p>
+                                <div class="grid grid-cols-2 gap-2 mt-2">
+                                    <div class="bg-indigo-50 p-2 rounded text-xs">
+                                        <p class="font-semibold text-indigo-800">Vector Search (60%)</p>
+                                        <p class="text-indigo-600">의미 기반 유사도 검색</p>
+                                    </div>
+                                    <div class="bg-green-50 p-2 rounded text-xs">
+                                        <p class="font-semibold text-green-800">BM25 (40%)</p>
+                                        <p class="text-green-600">키워드 매칭 검색</p>
+                                    </div>
+                                </div>
+                                <div class="mt-2 p-2 bg-yellow-50 rounded text-xs">
+                                    <p class="font-semibold text-yellow-800">검색 결과 (상위 2개):</p>
+                                    <p class="text-yellow-700">• 지진 > 발생 시 > 실내</p>
+                                    <p class="text-yellow-700">• 지진 > 발생 직후</p>
+                                </div>
+                            </div>
+
+                            <!-- 4-6 -->
+                            <div class="bg-white p-3 rounded border border-gray-200">
+                                <p class="font-semibold text-gray-700 text-sm">4-6. 통합 결과 생성</p>
+                                <div class="code-block mt-2 text-xs">
+return {
+    "text": "🚨 플레이데이터 근처 지진 발생 시...",
+    "structured_data": {
+        "location": "플레이데이터",
+        "coordinates": (37.4979, 127.0276),
+        "shelters": [...]
+    }
+}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow border-t-purple-300"></div>
+
+        <!-- Step 4: FastAPI 응답 -->
+        <div class="step-card bg-white rounded-xl shadow-lg p-6 mb-4" onclick="toggleStep('step4')">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div class="bg-teal-500 text-white w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold">
+                        4
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800">FastAPI 응답 반환</h2>
+                        <p class="text-gray-600">main.py</p>
+                    </div>
+                </div>
+                <span class="badge bg-teal-100 text-teal-800">Response</span>
+            </div>
+            
+            <div id="step4" class="step-details mt-4">
+                <div class="bg-gray-50 rounded-lg p-4 space-y-3">
+                    <div class="flex items-start space-x-3">
+                        <span class="text-2xl">🎁</span>
+                        <div>
+                            <h4 class="font-semibold text-gray-800">structured_data 추출</h4>
+                            <p class="text-gray-600 text-sm">Agent 결과에서 지도 표시용 데이터 추출</p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-start space-x-3">
+                        <span class="text-2xl">📤</span>
+                        <div>
+                            <h4 class="font-semibold text-gray-800">LocationExtractResponse 생성</h4>
+                            <div class="code-block mt-2">
+{
+    "success": true,
+    "location": "플레이데이터",
+    "coordinates": (37.4979, 127.0276),
+    "shelters": [...],
+    "message": "🚨 플레이데이터 근처 지진..."
+}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-start space-x-3">
+                        <span class="text-2xl">🚀</span>
+                        <div>
+                            <h4 class="font-semibold text-gray-800">JSON 응답 반환</h4>
+                            <p class="text-gray-600 text-sm">프론트엔드로 결과 전송</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="arrow border-t-teal-300"></div>
+
+        <!-- Step 5: UI 업데이트 -->
+        <div class="step-card bg-white rounded-xl shadow-lg p-6 mb-4" onclick="toggleStep('step5')">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div class="bg-red-500 text-white w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold">
+                        5
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800">UI 업데이트</h2>
+                        <p class="text-gray-600">shelter_1.0.html</p>
+                    </div>
+                </div>
+                <span class="badge bg-red-100 text-red-800">Visualization</span>
+            </div>
+            
+            <div id="step5" class="step-details mt-4">
+                <div class="bg-gray-50 rounded-lg p-4 space-y-4">
+                    <div class="flex items-start space-x-3">
+                        <span class="text-2xl">📥</span>
+                        <div>
+                            <h4 class="font-semibold text-gray-800">response.json() 파싱</h4>
+                            <p class="text-gray-600 text-sm">JavaScript로 JSON 데이터 처리</p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-start space-x-3">
+                        <span class="text-2xl">💬</span>
+                        <div>
+                            <h4 class="font-semibold text-gray-800">채팅창 메시지 출력</h4>
+                            <div class="code-block mt-2">
+addMessage("bot", response.message)</div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-start space-x-3">
+                        <span class="text-2xl">🗺️</span>
+                        <div>
+                            <h4 class="font-semibold text-gray-800">Naver Maps 시각화</h4>
+                            <ul class="text-sm text-gray-700 space-y-1 mt-2">
+                                <li>• 지도 중심 이동: (37.4979, 127.0276)</li>
+                                <li>• 사용자 위치 마커 생성 (파란색)</li>
+                                <li>• 대피소 마커 생성 (빨간색)</li>
+                                <li>&nbsp;&nbsp;- 서초구민회관</li>
+                                <li>&nbsp;&nbsp;- 강남역지하상가</li>
+                                <li>&nbsp;&nbsp;- 교보타워</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 p-4 bg-green-50 border-2 border-green-200 rounded-lg">
+                        <p class="text-center text-green-800 font-bold text-lg">
+                            ✅ 처리 완료! 사용자에게 결과 표시
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary -->
+        <div class="bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl shadow-lg p-8 mt-8">
+            <h3 class="text-2xl font-bold mb-4">⏱️ 전체 처리 시간</h3>
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
+                <div>
+                    <p class="text-3xl font-bold">~500ms</p>
+                    <p class="text-sm opacity-90">의도 분류</p>
+                </div>
+                <div>
+                    <p class="text-3xl font-bold">~300ms</p>
+                    <p class="text-sm opacity-90">질문 재정의</p>
+                </div>
+                <div>
+                    <p class="text-3xl font-bold">~1s</p>
+                    <p class="text-sm opacity-90">Kakao API</p>
+                </div>
+                <div>
+                    <p class="text-3xl font-bold">~800ms</p>
+                    <p class="text-sm opacity-90">DB 검색</p>
+                </div>
+                <div>
+                    <p class="text-3xl font-bold">~200ms</p>
+                    <p class="text-sm opacity-90">UI 렌더링</p>
+                </div>
+            </div>
+            <div class="mt-6 pt-6 border-t border-white/30">
+                <p class="text-center text-2xl font-bold">총 소요 시간: 약 2.8초</p>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center mt-8 text-gray-600 text-sm">
+            <p>💡 각 단계를 클릭하면 상세 내용을 볼 수 있습니다</p>
+        </div>
+    </div>
+
+    <script>
+        function toggleStep(stepId) {
+            const element = document.getElementById(stepId);
+            element.classList.toggle('active');
+        }
+    </script>
+</body>
+</html>
