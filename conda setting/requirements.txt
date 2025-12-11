@@ -1,11 +1,44 @@
-python-dotenv>=1.0.0          # 환경변수 로드 (.env 파일)
-langchain>=0.3.0              # LangChain 핵심 프레임워크
-langchain-openai>=0.2.0       # OpenAI 연동
-langchain-community>=0.3.0    # 커뮤니티 도구 (TextLoader, PyPDFLoader 등)
-langchain-text-splitters>=0.3.0  # 텍스트 분할기
-langchain-chroma>=0.1.0       # ChromaDB 연동
-langchain-core>=0.3.0         # LangChain 핵심 모듈
-langgraph>=0.2.0              # LangGraph 상태 기반 에이전트
-pydantic>=2.0.0               # 데이터 검증
-numpy>=1.24.0                 # 수치 연산
-chromadb>=0.5.0 
+# --- Environment & Configuration ---
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pydantic-settings
+
+# --- Core Web Framework ---
+fastapi
+uvicorn
+
+# --- LangChain Ecosystem (Core) ---
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-community>=0.3.0
+langchain-text-splitters>=0.3.0
+langchain-openai>=0.2.0
+langchain-chroma>=0.1.0
+
+# --- LangGraph & Agents (Explicitly included) ---
+langgraph>=0.2.0
+langgraph-checkpoint
+langgraph-prebuilt
+langgraph-sdk
+langsmith
+
+# --- Vector Database ---
+chromadb>=0.5.0
+
+# --- Data Processing ---
+pandas
+numpy>=1.24.0
+
+# --- Web Requests & Networking (Restored) ---
+requests
+requests-oauthlib
+httpx
+httpx-sse             # Server-Sent Events (Streaming용)
+aiohttp               # Async HTTP requests
+
+# --- Security & Crypto (Restored) ---
+cryptography          # SSL 인증서 관련
+
+# --- AI Utilities (Recommended) ---
+openai                # Direct OpenAI Client (LangChain 외 별도 사용 시)
+tiktoken              # Token counting (OpenAI 모델 사용 시 필수 권장)
