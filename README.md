@@ -104,21 +104,32 @@ SKN20-3RD-5TEAM/
 ## 🚀 설치 & 실행
 
 ### 0️⃣ 패키지 설치
+
 ```bash
 pip install -r requirements.txt
 ```
 
 **주요 패키지:**
-- `fastapi` - 웹 API 서버
-- `uvicorn` - ASGI 서버
-- `langchain` - LLM 프레임워크
-- `langgraph` - Agent 아키텍처
-- `langchain-openai` - OpenAI 통합
-- `langchain-chroma` - ChromaDB 통합
-- `langchain-community` - BM25 Retriever
-- `pandas` - 데이터 처리
-- `requests` - Kakao API 호출
 
+| 카테고리 | 패키지 | 역할 |
+|---------|--------|------|
+| **웹 프레임워크** | `fastapi` | REST API 서버 구축 |
+| | `uvicorn` | ASGI 서버 실행 |
+| | `pydantic` | 데이터 검증 및 직렬화 |
+| **AI/LLM** | `langchain` | LLM 프레임워크 핵심 |
+| | `langchain-openai` | OpenAI API 통합 |
+| | `langchain-community` | 커뮤니티 도구 (BM25 등) |
+| | `langchain-chroma` | ChromaDB 연동 |
+| | `langchain-core` | LangChain 핵심 모듈 |
+| | `langgraph` | Agent 상태 기반 그래프 |
+| | `openai` | OpenAI Python SDK |
+| **벡터 DB** | `chromadb` | 벡터 데이터베이스 |
+| **데이터 처리** | `pandas` | 테이블 데이터 처리 |
+| | `numpy` | 수치 연산 |
+| **네트워크** | `requests` | HTTP 요청 (Kakao API) |
+| | `httpx` | 비동기 HTTP 클라이언트 |
+| **환경 관리** | `python-dotenv` | .env 파일 로드 |
+| **보안** | `cryptography` | SSL 인증서 생성 |
 ---
 
 ### 1️⃣ 환경변수 설정 (.env)
