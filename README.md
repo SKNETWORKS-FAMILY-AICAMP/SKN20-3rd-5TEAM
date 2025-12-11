@@ -33,7 +33,7 @@
 | 임베딩 모델 | ![OpenAI](https://img.shields.io/badge/OpenAI%20Embedding-000000.svg?style=flat&logo=openai&logoColor=white) text-embedding-3-small |
 | 벡터 DB | ![ChromaDB](https://img.shields.io/badge/ChromaDB-16C47F.svg?style=flat&logo=databricks&logoColor=white) ChromaDB |
 | 검색 알고리즘 | Dense Retrieval (Vector Search)<br>BM25 (Sparse Retrieval)<br>Ensemble Hybrid Search |
-| 외부 API | Kakao Local API (위치 검색)<br>Naver Maps API (지도 시각화) |
+| 외부 API | Kakao Local API (위치 검색)<br>Naver Maps API (지도 시각화)<br>Naver Panorama API (거리뷰) |
 | 데이터 전처리 | ![Pandas](https://img.shields.io/badge/Pandas-150458.svg?style=flat&logo=pandas&logoColor=white) pandas |
 | 환경 변수 관리 | ![Dotenv](https://img.shields.io/badge/Dotenv-9ACD32.svg?style=flat&logo=dotenv&logoColor=white) python-dotenv (.env) |
 
@@ -69,6 +69,7 @@
 4. **실시간 지도 시각화**
    - Kakao Local API: 지명 → 좌표 변환
    - Naver Maps API: 대피소 마커 표시
+   - Naver Panorama API: 거리뷰 제공
    - GPS 기반 현위치 검색
 
 ---
@@ -278,12 +279,12 @@ python main.py
      - Haversine 공식으로 거리 계산
      - 가까운 5곳 반환 + `structured_data` (지도 표시용)
 
-   - **`@tool search_shelter_by_name(query)`**
+   - **`@tool search_shelter_by_name(query)`** ⭐ **새로 추가**
      - 시설명 부분 일치 검색
      - 메타데이터에서 `facility_name` 필터링
      - 수용인원, 주소 등 상세 정보 반환
 
-   - **`@tool search_location_with_disaster(query)`**
+   - **`@tool search_location_with_disaster(query)`** ⭐ **새로 추가**
      - 복합 질문 처리 (위치 + 재난)
      - 재난 키워드 추출 → 위치 검색 → 대피소 검색 + 행동요령 검색
      - 통합 결과 반환
@@ -346,9 +347,20 @@ python main.py
    - 사용자 위치 마커 표시
    - InfoWindow로 상세 정보 표시
 
-3. **GPS 위치 정보:**
+3. **Naver Panorama API 연동:** ⭐ **새로 추가**
+   - 지도 클릭 시 해당 위치의 거리뷰 표시
+   - 지도 영역과 파노라마 영역을 50%/50%로 분할
+   - 마커 클릭 시 해당 위치의 파노라마 자동 표시
+
+4. **GPS 위치 정보:**
    - `navigator.geolocation.getCurrentPosition()` 사용
    - 실시간 현위치 검색
+   - 페이지 로드 시 자동으로 현위치 표시 ⭐ **새로 추가**
+
+5. **현위치 기반 기능 강화:** ⭐ **새로 추가**
+   - `currentUserPosition` 전역 변수로 현위치 저장
+   - `resetMapToCurrentLocation()` 함수로 지도 정보 없을 때 현위치로 리셋
+   - 대피소 정보 없는 응답 시 자동으로 현위치 지도 표시
 
 ---
 
@@ -375,7 +387,7 @@ python generate_ssl_cert.py
 
 ### 질문: "지금 내가 플레이데이터 서초캠퍼스에 있는데 땅이 흔들리고 있어. 지금 내가 어떻게 행동해야하는지 또 어디로 대피해야하는지 알려줘"
 
-#### 🎬 전체 처리 흐름
+#### 🎬 전체 처리 흐름 [[📊 인터랙티브 플로우차트 보기](./RAG%20챗봇%20처리%20과정.html)]
 
 ```
 [1단계: 프론트엔드 (shelter_1.0.html)]
@@ -713,7 +725,7 @@ python generate_ssl_cert.py
 
 | 서비스 | 접속 링크 |
 |--------|-----------|
-| 민방위 대피시설 · 재난 행동요령 실시간 질의응답 챗봇 | 🔗 **https://61.78.100.233:8443/** |
+| 민방위 대피시설 · 재난 행동요령 실시간 질의응답 챗봇 | 🔗 **https://183.98.34.111:8443/** |
 
 
 ## 🎯 제공 기능
