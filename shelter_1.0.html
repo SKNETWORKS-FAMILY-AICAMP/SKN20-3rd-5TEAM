@@ -33,10 +33,10 @@
             </div>
             <div id="llm-status" class="llm-badge llm-off">LLM OFF</div>
         </header>
-        <!-- 상단: 지도 (50%) -->
-        <div id="map" class="w-full" style="height: 50%;"></div>
-        <!-- 하단: 파노라마 (50%) -->
-        <div id="pano" class="w-full bg-gray-800 relative" style="height: 50%;">
+        <!-- 지도 영역 (초기: 100%, 파노라마 표시 시: 50%) -->
+        <div id="map" class="w-full transition-all duration-300" style="height: 100%;"></div>
+        <!-- 파노라마 영역 (초기: 숨김, 지도 클릭 시: 50%) -->
+        <div id="pano" class="w-full bg-gray-800 relative transition-all duration-300" style="height: 0%; overflow: hidden;">
             <div id="pano-placeholder" class="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">
                 📷 지도를 클릭하면 파노라마가 표시됩니다
             </div>
@@ -114,6 +114,35 @@ const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
 const geoBtn = document.getElementById('geo-btn');
 const initialMessageEl = document.getElementById('initial-message');
+
+// 파노라마 표시
+function showPanorama() {
+    const mapDiv = document.getElementById('map');
+    const panoDiv = document.getElementById('pano');
+    const placeholder = document.getElementById('pano-placeholder');
+    
+    if (mapDiv && panoDiv) {
+        mapDiv.style.height = '50%';
+        panoDiv.style.height = '50%';
+        if (placeholder) placeholder.style.display = 'none';
+        console.log('📷 파노라마 표시');
+    }
+}
+
+// 파노라마 숨김 (지도 100%로 복귀)
+function hidePanorama() {
+    const mapDiv = document.getElementById('map');
+    const panoDiv = document.getElementById('pano');
+    const placeholder = document.getElementById('pano-placeholder');
+    
+    if (mapDiv && panoDiv) {
+        mapDiv.style.height = '100%';
+        panoDiv.style.height = '0%';
+        if (panorama) panorama.setVisible(false);
+        if (placeholder) placeholder.style.display = 'flex';
+        console.log('🗺️ 파노라마 숨김 (지도 전체)');
+    }
+}
 
 
 /* ───────────────────────────────────────────────────────────── */
@@ -280,6 +309,9 @@ async function handleChatInput() {
     chatInput.value = "";
     if (!q) return;
 
+    // 새 질문 입력 시 파노라마 숨기고 지도 100%로 복귀
+    hidePanorama();
+
     addMessage("user", q);
     setControlsDisabled(true);
 
@@ -398,20 +430,11 @@ function resetMapToCurrentLocation() {
             
             // 현위치 파노라마 표시
             if (panorama) {
+                showPanorama();
                 panorama.setPosition(currentUserPosition.position);
                 panorama.setVisible(true);
-                const placeholder = document.getElementById('pano-placeholder');
-                if (placeholder) placeholder.style.display = 'none';
             }
         });
-    }
-    
-    // 현위치 파노라마로 업데이트
-    if (panorama) {
-        panorama.setPosition(currentUserPosition.position);
-        panorama.setVisible(true);
-        const placeholder = document.getElementById('pano-placeholder');
-        if (placeholder) placeholder.style.display = 'none';
     }
     
     console.log('지도를 현위치로 리셋:', currentUserPosition.lat, currentUserPosition.lon);
@@ -490,10 +513,9 @@ function showMapWithMultipleShelters(centerLat, centerLon, shelters, locationNam
             
             // 마커 위치의 파노라마 표시
             if (panorama) {
+                showPanorama();
                 panorama.setPosition(p);
                 panorama.setVisible(true);
-                const placeholder = document.getElementById('pano-placeholder');
-                if (placeholder) placeholder.style.display = 'none';
             }
         });
 
@@ -546,12 +568,9 @@ function initializeMap() {
         // 클릭 위치의 파노라마 표시
         if (panorama) {
             const clickedPos = e.coord;
+            showPanorama();  // 파노라마 영역 표시
             panorama.setPosition(clickedPos);
             panorama.setVisible(true);
-            
-            // placeholder 숨기기
-            const placeholder = document.getElementById('pano-placeholder');
-            if (placeholder) placeholder.style.display = 'none';
             
             console.log('파노라마 위치 업데이트:', clickedPos.toString());
         }
@@ -605,10 +624,9 @@ function initializeMap() {
                     
                     // 현위치 파노라마 표시
                     if (panorama) {
+                        showPanorama();
                         panorama.setPosition(userPosition);
                         panorama.setVisible(true);
-                        const placeholder = document.getElementById('pano-placeholder');
-                        if (placeholder) placeholder.style.display = 'none';
                     }
                 });
 
