@@ -279,12 +279,12 @@ python main.py
      - Haversine 공식으로 거리 계산
      - 가까운 5곳 반환 + `structured_data` (지도 표시용)
 
-   - **`@tool search_shelter_by_name(query)`** ⭐ **새로 추가**
+   - **`@tool search_shelter_by_name(query)`** 
      - 시설명 부분 일치 검색
      - 메타데이터에서 `facility_name` 필터링
      - 수용인원, 주소 등 상세 정보 반환
 
-   - **`@tool search_location_with_disaster(query)`** ⭐ **새로 추가**
+   - **`@tool search_location_with_disaster(query)`** 
      - 복합 질문 처리 (위치 + 재난)
      - 재난 키워드 추출 → 위치 검색 → 대피소 검색 + 행동요령 검색
      - 통합 결과 반환
@@ -347,7 +347,7 @@ python main.py
    - 사용자 위치 마커 표시
    - InfoWindow로 상세 정보 표시
 
-3. **Naver Panorama API 연동:** ⭐ **새로 추가**
+3. **Naver Panorama API 연동:** 
    - 지도 클릭 시 해당 위치의 거리뷰 표시
    - 지도 영역과 파노라마 영역을 50%/50%로 분할
    - 마커 클릭 시 해당 위치의 파노라마 자동 표시
@@ -355,9 +355,9 @@ python main.py
 4. **GPS 위치 정보:**
    - `navigator.geolocation.getCurrentPosition()` 사용
    - 실시간 현위치 검색
-   - 페이지 로드 시 자동으로 현위치 표시 ⭐ **새로 추가**
+   - 페이지 로드 시 자동으로 현위치 표시 
 
-5. **현위치 기반 기능 강화:** ⭐ **새로 추가**
+5. **현위치 기반 기능 강화:** 
    - `currentUserPosition` 전역 변수로 현위치 저장
    - `resetMapToCurrentLocation()` 함수로 지도 정보 없을 때 현위치로 리셋
    - 대피소 정보 없는 응답 시 자동으로 현위치 지도 표시
