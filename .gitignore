@@ -4,5 +4,6 @@ chroma_db/
 *.json
 .env
 *.csv
-*__pycache__
+*__pycache__/
 generate_ssl_cert.py
+.vscode/
