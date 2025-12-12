@@ -62,7 +62,6 @@ INTENT_TESTSET = [
     ("쓰나미란?", "general_knowledge"),
     
     # shelter_name: 특정 시설명으로 검색
-    
     ("서울역 대피소 정보", "shelter_name"),
     ("롯데월드타워 대피소", "shelter_name"),
     ("동아아파트 정보", "shelter_name"),
