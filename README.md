@@ -32,10 +32,11 @@
 | LLM | ![OpenAI](https://img.shields.io/badge/OpenAI%20GPT--4o--mini-000000.svg?style=flat&logo=openai&logoColor=white) GPT-4o-mini |
 | 임베딩 모델 | ![OpenAI](https://img.shields.io/badge/OpenAI%20Embedding-000000.svg?style=flat&logo=openai&logoColor=white) text-embedding-3-small |
 | 벡터 DB | ![ChromaDB](https://img.shields.io/badge/ChromaDB-16C47F.svg?style=flat&logo=databricks&logoColor=white) ChromaDB |
-| 검색 알고리즘 | Dense Retrieval (Vector Search)<br>BM25 (Sparse Retrieval)<br>Ensemble Hybrid Search |
-| 외부 API | Kakao Local API (위치 검색)<br>Naver Maps API (지도 시각화)<br>Naver Panorama API (거리뷰) |
+| 검색 알고리즘 | ![Dense Retrieval](https://img.shields.io/badge/Dense%20Retrieval-4A90E2.svg?style=flat) Dense Retrieval (Vector Search)<br>![BM25](https://img.shields.io/badge/BM25-00A98F.svg?style=flat) BM25 (Sparse Retrieval)<br>![Hybrid Search](https://img.shields.io/badge/Hybrid%20Search-FF6F61.svg?style=flat) Ensemble Hybrid Search |
+| 외부 API | ![Kakao API](https://img.shields.io/badge/Kakao%20Local%20API-FFCD00.svg?style=flat&logo=kakao&logoColor=black) Kakao Local API (위치 검색)<br>![Naver Maps](https://img.shields.io/badge/Naver%20Maps%20API-03C75A.svg?style=flat&logo=naver&logoColor=white) Naver Maps API (지도 시각화)<br>![Naver Panorama](https://img.shields.io/badge/Naver%20Panorama%20API-03C75A.svg?style=flat&logo=naver&logoColor=white) Naver Panorama API (거리뷰) |
 | 데이터 전처리 | ![Pandas](https://img.shields.io/badge/Pandas-150458.svg?style=flat&logo=pandas&logoColor=white) pandas |
 | 환경 변수 관리 | ![Dotenv](https://img.shields.io/badge/Dotenv-9ACD32.svg?style=flat&logo=dotenv&logoColor=white) python-dotenv (.env) |
+
 
 ---
 
