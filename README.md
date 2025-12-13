@@ -731,7 +731,7 @@ python generate_ssl_cert.py
 ## 🖥 실행 화면
 
 <p align="center">
-  <img src="./image/실행화면.png" width="900"/>
+  <img src="./image/실행화면 이미지.png" width="900"/>
 </p>
 
 
